@@ -151,7 +151,7 @@ version: '3.8'
 
 services:
   tg-signer:
-    image: ssfun/tg-sign-plus:latest
+    image: sfun/tg-sign-plus:latest
     container_name: tg-sign-plus
     ports:
       - "8080:8080"
@@ -190,7 +190,7 @@ docker run -d \
   -e TG_API_HASH=your-api-hash \
   -e TZ=Asia/Shanghai \
   --restart unless-stopped \
-  ssfun/tg-sign-plus:latest
+  sfun/tg-sign-plus:latest
 ```
 
 ### 构建自定义镜像
