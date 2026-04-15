@@ -1,0 +1,87 @@
+name: Publish Tg Sign Plus Docker Image
+
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Get latest release tag
+        id: get_latest_tag
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/ssfun/tg-sign-plus/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")')
+          echo "Latest tag: $LATEST_TAG"
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Get current Docker image version
+        id: get_current_version
+        run: |
+          # 从 Docker Hub 获取当前镜像的版本号
+          CURRENT_TAG=$(curl -s https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/tg-sign-plus/tags/ | jq -r '.results[] | select(.name != "latest") | .name' | sort -V | tail -n 1)
+          if [ -z "$CURRENT_TAG" ]; then
+            CURRENT_TAG="0.0.0"  # 如果没有找到版本号，默认使用 0.0.0
+          fi
+          echo "Current Docker image version: $CURRENT_TAG"
+          echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
+
+      - name: Compare versions
+        id: compare_versions
+        run: |
+          LATEST_TAG="${{ steps.get_latest_tag.outputs.latest_tag }}"
+          CURRENT_TAG="${{ steps.get_current_version.outputs.current_tag }}"
+
+          # 去掉版本号中的 "v" 前缀
+          LATEST_VERSION=$(echo "$LATEST_TAG" | sed 's/^v//')
+          CURRENT_VERSION=$(echo "$CURRENT_TAG" | sed 's/^v//')
+
+          # 使用 sort -V 比较版本号
+          HIGHER_VERSION=$(echo -e "$LATEST_VERSION\n$CURRENT_VERSION" | sort -V | tail -n 1)
+
+          if [[ "$HIGHER_VERSION" == "$LATEST_VERSION" && "$LATEST_VERSION" != "$CURRENT_VERSION" ]]; then
+            echo "New version available, continuing..."
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "No new version available, stopping..."
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.compare_versions.outputs.should_build == 'true'
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
+        if: steps.compare_versions.outputs.should_build == 'true'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        if: steps.compare_versions.outputs.should_build == 'true'
+        uses: docker/build-push-action@v4
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/tg-sign-plus:latest
+            ${{ secrets.DOCKER_USERNAME }}/tg-sign-plus:${{ steps.get_latest_tag.outputs.latest_tag }}
+
+  cleanup-runs:
+    runs-on: ubuntu-latest
+    needs: build-and-push  # 确保在 build-and-push 任务完成后执行
+    permissions:
+      actions: write  # 需要 write 权限来删除运行日志
+      contents: read  # 需要 read 权限来访问仓库信息
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.GH_TOKEN }}  # 使用默认的 GITHUB_TOKEN
+          repository: ${{ github.repository }}  # 当前仓库
+          retain_days: 7  # 保留最近 7 天的运行日志
+          keep_minimum_runs: 6  # 至少保留 6 条运行日志
