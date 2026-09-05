@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import logging
 import os
 import secrets
@@ -633,7 +634,7 @@ class TelegramService:
 
         try:
             async with global_semaphore:
-                # 重新连接 (因为 start_login 中断开了)
+                # start_login 保持连接；仅在连接意外断开时重连。
                 if not client.is_connected:
                     await client.connect()
 
@@ -648,12 +649,8 @@ class TelegramService:
                     me = await client.get_me()
                     await _persist_session_string()
                     _persist_proxy_setting()
-                    try:
-                        from backend.services.sign_tasks import get_sign_task_service
 
-                        await get_sign_task_service().refresh_account_chats(account_name)
-                    except Exception:
-                        pass
+                    # 聊天列表由任务页按需加载，不能在持有账号锁时刷新。
 
                     # 断开连接并清理
                     await client.disconnect()
@@ -679,12 +676,6 @@ class TelegramService:
                         me = await client.get_me()
                         await _persist_session_string()
                         _persist_proxy_setting()
-                        try:
-                            from backend.services.sign_tasks import get_sign_task_service
-
-                            await get_sign_task_service().refresh_account_chats(account_name)
-                        except Exception:
-                            pass
 
                         # 断开连接并清理
                         await client.disconnect()
@@ -770,7 +761,7 @@ class TelegramService:
             from backend.services.sign_tasks import get_sign_task_service
 
             get_sign_task_service().ensure_account_chat_cache_meta(account_name)
-            await get_sign_task_service().refresh_account_chats(account_name)
+            # Chat lists load on demand in the task page, after login releases its locks.
         except Exception:
             pass
         self._accounts_cache = None
@@ -786,6 +777,14 @@ class TelegramService:
                 return
             data["last_state_logged"] = state
         logger.info("qr_login state=%s login_id=%s", state, login_id)
+
+    @staticmethod
+    async def _parse_login_user(client, user):
+        from pyrogram import types
+
+        # Kurigram 2.2.x contains both synchronous and asynchronous parsers.
+        parsed = types.User._parse(client, user)
+        return await parsed if inspect.isawaitable(parsed) else parsed
 
     async def _apply_migrate_auth(self, client, data: Dict[str, Any]) -> None:
         migrate_dc_id = data.get("migrate_dc_id")
@@ -823,6 +822,15 @@ class TelegramService:
             except Exception:
                 pass
         if client:
+            # Kurigram stop/disconnect does not close non-media DC sessions.
+            # Close these before the primary connection and storage are shut down.
+            sessions = getattr(client, "sessions", {})
+            for session in list(sessions.values()):
+                try:
+                    await session.stop()
+                except Exception:
+                    logger.warning("Failed to close QR login DC session", exc_info=True)
+            sessions.clear()
             try:
                 if getattr(client, "is_initialized", False):
                     await client.stop()
@@ -1047,9 +1055,8 @@ class TelegramService:
             raise ValueError(f"获取二维码失败: {str(e)}")
 
     async def get_qr_login_status(self, login_id: str) -> Dict[str, Any]:
-        from pyrogram import raw, types
+        from pyrogram import raw
         from pyrogram.errors import FloodWait, SessionPasswordNeeded, Unauthorized
-        from pyrogram.methods.messages.inline_session import get_session
 
         data = _qr_login_sessions.get(login_id)
         if not data:
@@ -1093,7 +1100,7 @@ class TelegramService:
 
         async def _finalize_login(login_result: Any) -> Dict[str, Any]:
             # 标记授权用户
-            user = types.User._parse(client, login_result.authorization.user)
+            user = await self._parse_login_user(client, login_result.authorization.user)
             await client.storage.user_id(user.id)
             await client.storage.is_bot(False)
             data["authorized"] = True
@@ -1192,7 +1199,8 @@ class TelegramService:
                     try:
                         for _ in range(2):
                             if migrate_dc_id:
-                                session = await get_session(client, migrate_dc_id)
+                                # 登录尚未完成，目标 DC 通过 login token 授权。
+                                session = await client.get_session(migrate_dc_id, export_authorization=False)
                                 self._capture_migrate_auth(data, session)
                                 result = await session.invoke(
                                     raw.functions.auth.ImportLoginToken(token=token)
@@ -1278,7 +1286,7 @@ class TelegramService:
                                     data["migrate_dc_id"] = export_result.dc_id
                                     data["token"] = export_result.token
                                     try:
-                                        session = await get_session(client, export_result.dc_id)
+                                        session = await client.get_session(export_result.dc_id, export_authorization=False)
                                         self._capture_migrate_auth(data, session)
                                         migrate_result = await session.invoke(
                                             raw.functions.auth.ImportLoginToken(token=export_result.token)
@@ -1359,14 +1367,13 @@ class TelegramService:
             }
 
     async def submit_qr_password(self, login_id: str, password: str) -> Dict[str, Any]:
-        from pyrogram import raw, types
+        from pyrogram import raw
         from pyrogram.errors import (
             FloodWait,
             PasswordHashInvalid,
             SessionPasswordNeeded,
             Unauthorized,
         )
-        from pyrogram.methods.messages.inline_session import get_session
         from pyrogram.utils import compute_password_check
 
         password = (password or "").strip()
@@ -1399,7 +1406,7 @@ class TelegramService:
             user_from_password = None
             try:
                 if data.get("migrate_dc_id"):
-                    session = await get_session(client, data.get("migrate_dc_id"))
+                    session = await client.get_session(data.get("migrate_dc_id"), export_authorization=False)
                     self._capture_migrate_auth(data, session)
                     auth = await session.invoke(
                         raw.functions.auth.CheckPassword(
@@ -1409,7 +1416,7 @@ class TelegramService:
                             )
                         )
                     )
-                    user_from_password = types.User._parse(client, auth.user)
+                    user_from_password = await self._parse_login_user(client, auth.user)
                     await client.storage.user_id(user_from_password.id)
                     await client.storage.is_bot(False)
                     data["authorized"] = True
@@ -1474,7 +1481,7 @@ class TelegramService:
                         try:
                             for _ in range(2):
                                 if migrate_dc_id:
-                                    session = await get_session(client, migrate_dc_id)
+                                    session = await client.get_session(migrate_dc_id, export_authorization=False)
                                     self._capture_migrate_auth(data, session)
                                     result = await session.invoke(
                                         raw.functions.auth.ImportLoginToken(token=token)
@@ -1501,7 +1508,7 @@ class TelegramService:
                             result = None
 
                     if isinstance(result, raw.types.auth.LoginTokenSuccess):
-                        user = types.User._parse(client, result.authorization.user)
+                        user = await self._parse_login_user(client, result.authorization.user)
                         await client.storage.user_id(user.id)
                         await client.storage.is_bot(False)
                         data["authorized"] = True
@@ -1553,7 +1560,7 @@ class TelegramService:
                             if isinstance(
                                 export_result, raw.types.auth.LoginTokenSuccess
                             ):
-                                user = types.User._parse(
+                                user = await self._parse_login_user(
                                     client, export_result.authorization.user
                                 )
                                 await client.storage.user_id(user.id)
@@ -1567,9 +1574,7 @@ class TelegramService:
                                 data["migrate_dc_id"] = export_result.dc_id
                                 data["token"] = export_result.token
                                 try:
-                                    session = await get_session(
-                                        client, export_result.dc_id
-                                    )
+                                    session = await client.get_session(export_result.dc_id, export_authorization=False)
                                     self._capture_migrate_auth(data, session)
                                     migrate_result = await session.invoke(
                                         raw.functions.auth.ImportLoginToken(
@@ -1580,7 +1585,7 @@ class TelegramService:
                                         migrate_result,
                                         raw.types.auth.LoginTokenSuccess,
                                     ):
-                                        user = types.User._parse(
+                                        user = await self._parse_login_user(
                                             client, migrate_result.authorization.user
                                         )
                                         await client.storage.user_id(user.id)
@@ -1630,7 +1635,7 @@ class TelegramService:
                 try:
                     for _ in range(2):
                         if migrate_dc_id:
-                            session = await get_session(client, migrate_dc_id)
+                            session = await client.get_session(migrate_dc_id, export_authorization=False)
                             self._capture_migrate_auth(data, session)
                             result = await session.invoke(
                                 raw.functions.auth.ImportLoginToken(token=token)
@@ -1668,7 +1673,7 @@ class TelegramService:
                     raise ValueError("请先在手机端确认登录")
 
                 if isinstance(result, raw.types.auth.LoginTokenSuccess):
-                    user = types.User._parse(client, result.authorization.user)
+                    user = await self._parse_login_user(client, result.authorization.user)
                     await client.storage.user_id(user.id)
                     await client.storage.is_bot(False)
                     data["authorized"] = True
