@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import abc
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
@@ -192,7 +192,7 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
         from backend.models.sign_task_run import SignTaskRun
 
         if cutoff.tzinfo is not None:
-            cutoff = cutoff.astimezone(UTC).replace(tzinfo=None)
+            cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
 
         db = self._get_db()
         try:
@@ -228,9 +228,9 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
             try:
                 tz = ZoneInfo(get_settings().timezone)
             except Exception:
-                tz = UTC
+                tz = timezone.utc
             if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=UTC)
+                created_at = created_at.replace(tzinfo=timezone.utc)
             created_at_str = created_at.astimezone(tz).isoformat()
         else:
             created_at_str = ""

@@ -153,7 +153,7 @@ export default function SettingsPage() {
         } catch (err) { }
     };
 
-    const loadAIConfig = async () => {
+    async function loadAIConfig() {
         try {
             const config = await getAIConfig();
             setAIConfigState(config);
@@ -167,14 +167,14 @@ export default function SettingsPage() {
         } catch (err) { }
     };
 
-    const loadGlobalSettings = async () => {
+    async function loadGlobalSettings() {
         try {
             const settings = await getGlobalSettings();
             setGlobalSettings(settings);
         } catch (err) { }
     };
 
-    const loadTelegramConfig = async () => {
+    async function loadTelegramConfig() {
         try {
             const config = await getTelegramConfig();
             setTelegramConfig(config);

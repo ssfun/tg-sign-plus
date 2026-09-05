@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "../context/ThemeContext";
 import { LanguageProvider } from "../context/LanguageContext";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = localFont({ src: "./fonts/Inter-latin.woff2", weight: "100 900", style: "normal", display: "swap" });
 
 export const metadata: Metadata = {
   title: "TG Sign Plus",

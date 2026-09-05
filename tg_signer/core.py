@@ -26,6 +26,12 @@ from pyrogram.types import Message, Object, User
 from tg_signer.config import (
     ActionT,
     AssertSuccessByTextAction,
+    ClickKeyboardByTextAction,
+    ChooseOptionByImageAction,
+    ReplyByCalculationProblemAction,
+    ReplyByImageRecognitionAction,
+    ClickButtonByCalculationProblemAction,
+    ClickButtonByPoetryFillAction,
     BaseJSONConfig,
     HttpCallback,
     MatchConfig,

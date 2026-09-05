@@ -114,7 +114,7 @@ docker build -t tg-sign-plus:local .
 docker run -d --name tg-sign-plus -p 8080:8080 -v "$(pwd)/data:/data" tg-sign-plus:local
 ```
 
-镜像构建阶段需要拉取 `ghcr.io/komari-monitor/komari-agent:latest`。只有同时设置 `KOMARI_SERVER` 和 `KOMARI_SECRET` 时，容器入口才会启动该 agent。
+默认镜像包含 Komari，构建阶段会拉取 `ghcr.io/komari-monitor/komari-agent:latest`。只有同时设置 `KOMARI_SERVER` 和 `KOMARI_SECRET` 时，容器入口才会启动该 agent。
 
 ## 本地开发
 
@@ -188,6 +188,8 @@ npm run build
 5. 进入账号工作台创建任务，选择目标会话、调度模式和动作序列。
 6. 任务可以立即执行，也可以交给后端 APScheduler 定时执行；任务历史会保存流程、结果摘要和诊断信息。
 7. 单个任务可复制/导入导出；“设置”页可导入导出全部任务和设置。
+
+任务编辑器支持切换编辑多会话任务，保存时保留全部会话。超时、历史扫描和 AI 兜底参数位于“高级设置”，通常无需修改。执行状态暂时无法读取时，页面会保留监控并自动重试。
 
 健康检查端点：
 
@@ -433,3 +435,21 @@ npm run build
 - [Kurigram](https://github.com/KurimuzonAkuma/kurigram)
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [Next.js](https://nextjs.org/)
+
+## 自动校验
+
+PR、push 和镜像发布前会运行 Python 3.10/3.12 后端回归测试，以及前端 ESLint、TypeScript、Vitest 和生产构建。`tests/` 已纳入版本控制。
+
+```bash
+pip install -e . pytest pytest-asyncio ruff
+python -m pytest -q
+ruff check --select E9,F821,F822,F823 backend tg_signer tg_signer_contracts tests
+cd frontend
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+密钥文件无法读取、生成或保存时，后端会拒绝启动；请修复数据目录权限或配置 `APP_SECRET_KEY`。旧版公开默认密钥和空密钥不再接受。

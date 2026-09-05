@@ -8,9 +8,9 @@ from typing import Optional
 from backend.utils.storage import get_initial_data_dir, get_writable_base_dir
 
 try:
-    from pydantic.v1 import BaseSettings, Field, root_validator
+    from pydantic.v1 import BaseSettings, Field, root_validator, validator
 except ImportError:
-    from pydantic import BaseSettings, Field, root_validator
+    from pydantic import BaseSettings, Field, root_validator, validator
 
 
 def get_default_base_dir() -> Path:
@@ -41,16 +41,21 @@ def get_default_secret_key() -> str:
             stored_key = secret_file.read_text().strip()
             if stored_key:
                 return stored_key
+            raise RuntimeError("持久化密钥文件为空，请设置 APP_SECRET_KEY")
     except Exception as e:
-        logger.warning(f"无法读取持久化密钥文件: {e}")
+        raise RuntimeError(
+            "无法读取持久化密钥，请修复文件权限或设置 APP_SECRET_KEY"
+        ) from e
 
     # 生成新密钥并持久化
     try:
         new_key = secrets.token_urlsafe(32)
         secret_file = get_default_base_dir() / ".secret_key"
         secret_file.parent.mkdir(parents=True, exist_ok=True)
-        secret_file.write_text(new_key)
-        secret_file.chmod(0o600)
+        # Create with restrictive permissions; never overwrite another process's key.
+        fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as stream:
+            stream.write(new_key)
 
         logger.warning(
             f"自动生成 JWT 密钥并保存到 {secret_file}，"
@@ -58,12 +63,9 @@ def get_default_secret_key() -> str:
         )
         return new_key
     except Exception as e:
-        logger.error(f"无法生成或保存密钥文件: {e}")
-        # 最后的兜底方案：使用固定默认值（不安全）
-        logger.critical(
-            "使用不安全的默认密钥！生产环境必须设置 APP_SECRET_KEY 环境变量"
-        )
-        return "tg-signer-default-secret-key-please-change-in-production-2024"
+        raise RuntimeError(
+            "无法持久化安全密钥，请修复目录权限或设置 APP_SECRET_KEY"
+        ) from e
 
 
 def get_default_database_url() -> str:
@@ -82,6 +84,17 @@ class Settings(BaseSettings):
 
     # 使用函数获取默认密钥
     secret_key: str = Field(default_factory=get_default_secret_key)
+
+    @validator("secret_key", always=True)
+    def validate_secret_key(cls, value):
+        value = value.strip()
+        if (
+            not value
+            or value == "tg-signer-default-secret-key-please-change-in-production-2024"
+        ):
+            raise ValueError("APP_SECRET_KEY 不能为空或使用旧版公开默认密钥")
+        return value
+
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
     refresh_cookie_name: str = "tg-signer-refresh"

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
@@ -22,12 +24,16 @@
     "tailwindcss": "^3.4.3"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^20.11.19",
     "@types/react": "^18.2.46",
     "@types/react-dom": "^18.2.18",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.2.4",
-    "typescript": "^5.3.3"
+    "jsdom": "^26.1.0",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.7"
   },
   "overrides": {
     "postcss": "^8.5.12"

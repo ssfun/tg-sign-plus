@@ -6,7 +6,13 @@ on:
     types: [published]  # 新 release 发布时触发
 
 jobs:
+  validate:
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+
   prepare:
+    needs: validate
     runs-on: ubuntu-latest
 
     outputs:

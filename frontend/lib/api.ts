@@ -1138,6 +1138,9 @@ export const runSignTask = (name: string, accountName: string) => {
   });
 };
 
+export const getSignTaskStatus = (name: string, accountName: string, signal?: AbortSignal) =>
+  request<{ running: boolean }>(`/sign-tasks/${pathSegment(name)}/status?${new URLSearchParams({ account_name: accountName })}`, { signal });
+
 export const getAccountChats = (
   accountName: string,
   options?: { forceRefresh?: boolean; autoRefreshIfExpired?: boolean; ensureExists?: boolean }
@@ -1329,12 +1332,14 @@ export const getCanaryReport = (options?: {
 export const getSignTaskHistory = (
   name: string,
   accountName: string,
-  limit: number = 20
+  limit: number = 20,
+  signal?: AbortSignal
 ) => {
   const params = new URLSearchParams();
   params.append("account_name", accountName);
   params.append("limit", String(limit));
   return request<SignTaskHistoryItem[]>(
-    `/sign-tasks/${pathSegment(name)}/history?${params.toString()}`
+    `/sign-tasks/${pathSegment(name)}/history?${params.toString()}`,
+    { signal }
   );
 };

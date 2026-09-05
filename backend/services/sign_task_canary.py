@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -88,8 +88,8 @@ def _parse_time(value: Any) -> datetime | None:
         normalized = text.replace("Z", "+00:00")
         parsed = datetime.fromisoformat(normalized)
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        return parsed.astimezone(UTC)
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
     except ValueError:
         return None
 
@@ -261,7 +261,7 @@ def generate_event_engine_diagnostic_report(
     history_limit = max(int(history_limit or 1), 1)
     if max_age_hours is not None:
         max_age_hours = max(float(max_age_hours), 0)
-    now = (now or datetime.now(UTC)).astimezone(UTC)
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     tasks = [
         normalize_event_task_config(task)
         for task in config_repo.list_configs(account_name=account_name)

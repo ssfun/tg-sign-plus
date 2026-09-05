@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from pyrogram.types import Message
@@ -22,12 +22,12 @@ def _read_float_env(name: str, default: float, minimum: float = 1.0) -> float:
 def _message_time(message: Message) -> datetime | None:
     message_time = getattr(message, "edit_date", None) or getattr(message, "date", None)
     if message_time and message_time.tzinfo is None:
-        return message_time.replace(tzinfo=UTC)
+        return message_time.replace(tzinfo=timezone.utc)
     return message_time
 
 
 def _message_sort_key(message: Message) -> tuple:
-    return (_message_time(message) or datetime.min.replace(tzinfo=UTC), message.id)
+    return (_message_time(message) or datetime.min.replace(tzinfo=timezone.utc), message.id)
 
 
 def _message_is_after_action(message: Message, action_started_at: datetime) -> bool:
@@ -73,7 +73,7 @@ async def assert_success_by_text(
     )
 
     start = time.perf_counter()
-    action_started_at = datetime.now(UTC)
+    action_started_at = datetime.now(timezone.utc)
     checked_message_versions = set()
     last_checked_callback_text = None
 

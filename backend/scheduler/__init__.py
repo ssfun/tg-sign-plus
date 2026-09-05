@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -30,6 +31,7 @@ def create_cron_trigger(cron_str: str) -> CronTrigger:
     parts = cron_str.split()
     if len(parts) == 6:
         return CronTrigger(
+            timezone=_get_scheduler_timezone(),
             second=parts[0],
             minute=parts[1],
             hour=parts[2],
@@ -37,7 +39,7 @@ def create_cron_trigger(cron_str: str) -> CronTrigger:
             month=parts[4],
             day_of_week=parts[5],
         )
-    return CronTrigger.from_crontab(cron_str)
+    return CronTrigger.from_crontab(cron_str, timezone=_get_scheduler_timezone())
 
 
 def _get_scheduler_logger() -> logging.Logger:
@@ -92,7 +94,7 @@ def _parse_last_run_time(last_run: dict | None) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
 
 
@@ -104,11 +106,15 @@ def _has_run_on_local_day(last_run: dict | None, now: datetime, tz: ZoneInfo) ->
 
 
 def _cron_job_id(account_name: str, task_name: str) -> str:
-    return f"sign-{account_name}-{task_name}"
+    return "sign-" + json.dumps(
+        [account_name, task_name], ensure_ascii=True, separators=(",", ":")
+    )
 
 
 def _range_execution_job_id(account_name: str, task_name: str) -> str:
-    return f"sign-exec-{account_name}-{task_name}"
+    return "sign-exec-" + json.dumps(
+        [account_name, task_name], ensure_ascii=True, separators=(",", ":")
+    )
 
 
 def _parse_scheduled_time(value: str | None) -> datetime | None:
@@ -119,7 +125,7 @@ def _parse_scheduled_time(value: str | None) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
 
 
@@ -181,7 +187,7 @@ def _schedule_range_execution(
     _update_next_scheduled_at(
         task_name,
         account_name,
-        actual_run_time.astimezone(UTC),
+        actual_run_time.astimezone(timezone.utc),
     )
     logger.info(
         "Scheduler: 已登记一次性执行任务 id=%s run_at=%s",
@@ -220,17 +226,23 @@ async def _job_run_sign_task(
         task_config = sign_task_service.get_task(task_name, account_name)
 
         if not task_config:
-            logger.warning(f"Scheduler: 任务 {task_name} (账号: {account_name}) 配置不存在")
+            logger.warning(
+                f"Scheduler: 任务 {task_name} (账号: {account_name}) 配置不存在"
+            )
             return
 
         if not skip_range_delay and task_config.get("execution_mode") == "range":
             range_start_str = task_config.get("range_start")
             range_end_str = task_config.get("range_end")
-            existing_scheduled_at = _parse_scheduled_time(task_config.get("next_scheduled_at"))
-            now_utc = datetime.now(UTC)
+            existing_scheduled_at = _parse_scheduled_time(
+                task_config.get("next_scheduled_at")
+            )
+            now_utc = datetime.now(timezone.utc)
 
             if existing_scheduled_at and existing_scheduled_at > now_utc:
-                if scheduler and scheduler.get_job(_range_execution_job_id(account_name, task_name)):
+                if scheduler and scheduler.get_job(
+                    _range_execution_job_id(account_name, task_name)
+                ):
                     logger.info(
                         "Scheduler: 任务 %s 已存在预计执行时间 %s，跳过重新随机",
                         task_name,
@@ -250,15 +262,21 @@ async def _job_run_sign_task(
 
                         if total_seconds > 0:
                             random_offset = random.uniform(0, total_seconds)
-                            actual_run_time = start_dt + timedelta(seconds=random_offset)
-                            _schedule_range_execution(account_name, task_name, actual_run_time)
+                            actual_run_time = start_dt + timedelta(
+                                seconds=random_offset
+                            )
+                            _schedule_range_execution(
+                                account_name, task_name, actual_run_time
+                            )
                             logger.info(
                                 f"Scheduler: 任务 {task_name} 已调度到 {actual_run_time.strftime('%H:%M:%S')} "
                                 f"(窗口: {range_start_str} - {range_end_str}, 延迟: {int(random_offset)}秒)"
                             )
                             return
                 except Exception as e:
-                    logger.error(f"Scheduler: 预计算调度时间失败: {e}，将立即执行", exc_info=True)
+                    logger.error(
+                        f"Scheduler: 预计算调度时间失败: {e}，将立即执行", exc_info=True
+                    )
 
         await _execute_sign_task(account_name, task_name)
 
@@ -269,7 +287,7 @@ async def _job_run_sign_task(
 async def _restore_pending_range_jobs(sign_tasks: list[dict]) -> None:
     tz = _get_scheduler_timezone()
     logger = _get_scheduler_logger()
-    now_utc = datetime.now(UTC)
+    now_utc = datetime.now(timezone.utc)
 
     for st in sign_tasks:
         if not st.get("enabled", True) or st.get("execution_mode") != "range":
@@ -307,7 +325,7 @@ async def _schedule_startup_range_catchups(sign_tasks: list[dict]) -> None:
     """启动时补跑逻辑 - 仅在没有有效预计执行时间时补建"""
     tz = _get_scheduler_timezone()
     logger = _get_scheduler_logger()
-    now_utc = datetime.now(UTC)
+    now_utc = datetime.now(timezone.utc)
 
     for st in sign_tasks:
         if not st.get("enabled", True) or st.get("execution_mode") != "range":
@@ -375,10 +393,16 @@ def _log_scheduler_sync_summary(sign_tasks: list[dict]) -> None:
     )
 
     for st in sign_tasks:
-        job_id = _cron_job_id(st['account_name'], st['name'])
+        job_id = _cron_job_id(st["account_name"], st["name"])
         job = scheduler.get_job(job_id)
-        next_run = job.next_run_time.isoformat() if job and job.next_run_time else "None"
-        if st.get("execution_mode") == "range" and st.get("range_start") and st.get("range_end"):
+        next_run = (
+            job.next_run_time.isoformat() if job and job.next_run_time else "None"
+        )
+        if (
+            st.get("execution_mode") == "range"
+            and st.get("range_start")
+            and st.get("range_end")
+        ):
             schedule_desc = f"{st['range_start']} - {st['range_end']}"
         else:
             schedule_desc = st.get("sign_at", "")
@@ -398,7 +422,11 @@ def get_scheduler_status(account_name: str | None = None) -> dict[str, object]:
 
     settings = get_settings()
     jobs = scheduler.get_jobs() if scheduler else []
-    sign_jobs = [job for job in jobs if job.id.startswith("sign-") and not job.id.startswith("sign-exec-")]
+    sign_jobs = [
+        job
+        for job in jobs
+        if job.id.startswith("sign-") and not job.id.startswith("sign-exec-")
+    ]
 
     sign_task_service = get_sign_task_service()
     sign_tasks = sign_task_service.list_tasks(force_refresh=True)
@@ -412,14 +440,16 @@ def get_scheduler_status(account_name: str | None = None) -> dict[str, object]:
 
     sign_task_statuses: list[dict[str, object]] = []
     for st in sign_tasks:
-        job_id = _cron_job_id(st['account_name'], st['name'])
+        job_id = _cron_job_id(st["account_name"], st["name"])
         job = scheduler.get_job(job_id) if scheduler else None
         execution_job = (
             scheduler.get_job(_range_execution_job_id(st["account_name"], st["name"]))
             if scheduler and st.get("execution_mode") == "range"
             else None
         )
-        cron_next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
+        cron_next_run = (
+            job.next_run_time.isoformat() if job and job.next_run_time else None
+        )
         execution_next_run = (
             execution_job.next_run_time.isoformat()
             if execution_job and execution_job.next_run_time
@@ -482,7 +512,7 @@ async def sync_jobs(schedule_range_catchup: bool = False) -> None:
     sign_task_service = get_sign_task_service()
     sign_tasks = sign_task_service.list_tasks(force_refresh=True)
     for st in sign_tasks:
-        job_id = _cron_job_id(st['account_name'], st['name'])
+        job_id = _cron_job_id(st["account_name"], st["name"])
         desired_ids.add(job_id)
 
         if not st.get("enabled", True):
@@ -604,4 +634,3 @@ def remove_sign_task_job(account_name: str, task_name: str) -> None:
         _clear_next_scheduled_at(task_name, account_name)
     except Exception as e:
         print(f"Scheduler: 移除任务 {cron_job_id} 失败: {e}")
-

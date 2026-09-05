@@ -1166,6 +1166,19 @@ async def delete_sign_task(
     return {"ok": True}
 
 
+@router.get("/{task_name}/status")
+def get_sign_task_status(
+    task_name: str,
+    account_name: str,
+    current_user=Depends(get_current_user),
+    service: SignTaskService = Depends(get_sign_task_service),
+):
+    account_name = _valid_account_name(account_name)
+    if service.get_task(task_name, account_name) is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {"running": service.is_task_running(task_name, account_name=account_name)}
+
+
 @router.post("/{task_name}/run", response_model=RunTaskResult)
 async def run_sign_task(
     task_name: str,

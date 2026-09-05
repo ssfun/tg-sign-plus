@@ -1,4 +1,4 @@
-﻿FROM node:20-slim AS frontend-builder
+FROM node:20-slim AS frontend-builder
 
 WORKDIR /frontend
 
@@ -28,13 +28,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential tzdata gosu && \
   rm -rf /var/lib/apt/lists/*
   
-# Copy Komari agent
+
+# Keep Komari in the default image; credentials control whether it starts.
 COPY --from=ghcr.io/komari-monitor/komari-agent:latest /app/komari-agent /app/komari-agent
 
 # Copy project sources and install Python dependencies from pyproject.
 COPY . /app
-RUN pip install --no-cache-dir . && \
-  pip install --no-cache-dir psycopg2-binary
+RUN pip install --no-cache-dir .
 
 # Install tgcrypto only on amd64 to avoid arm64 build failures.
 ARG TARGETPLATFORM

@@ -19,7 +19,7 @@ if [ -n "$KOMARI_SERVER" ] && [ -n "$KOMARI_SECRET" ]; then
     echo "INFO: Starting komari agent..."
     /app/komari-agent -e "$KOMARI_SERVER" -t "$KOMARI_SECRET" --disable-auto-update >>/tmp/komari-agent.log 2>&1 &
 else
-    echo "WARN: Komari agent skipped."
+    echo "INFO: Komari agent skipped (credentials not configured)."
 fi
 
 # If /data is mounted, prefer running as its owner/group to avoid chmod 777.
@@ -31,6 +31,8 @@ if [ -d /data ]; then
     TARGET_GID="${DATA_GID}"
   fi
 fi
+
+UVICORN_CMD="uvicorn backend.main:app --host 0.0.0.0 --port ${PORT_VALUE} --workers 1 --limit-concurrency 20"
 
 if [ "$(id -u)" -eq 0 ]; then
   if [ "${AUTO_FIX_PERMS}" != "0" ] && [ -d /data ]; then
@@ -49,7 +51,6 @@ if [ "$(id -u)" -eq 0 ]; then
     done
   fi
 
-  UVICORN_CMD="uvicorn backend.main:app --host 0.0.0.0 --port ${PORT_VALUE} --workers 1 --limit-concurrency 20"
 
   # If mounted volume is root-owned, keep root to preserve writability.
   if [ "${TARGET_UID}" = "0" ] || [ "${TARGET_GID}" = "0" ]; then

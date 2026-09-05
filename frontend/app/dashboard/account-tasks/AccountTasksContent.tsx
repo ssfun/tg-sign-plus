@@ -1,53 +1,11 @@
 "use client";
 
-import { useEffect, useState, memo, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ensureAccessToken, logout } from "../../../lib/auth";
-import {
-    listSignTasks,
-    deleteSignTask,
-    runSignTask,
-    getSignTaskHistory,
-    getAccountChats,
-    refreshAccountChats,
-    searchAccountChats,
-    createSignTask,
-    updateSignTask,
-    setSignTaskEnabled,
-    exportSignTask,
-    importSignTask,
-    getSchedulerStatus,
-    SignTask,
-    SignTaskFlowItem,
-    SignTaskHistoryItem,
-    ChatInfo,
-    CreateSignTaskRequest,
-    SchedulerStatus,
-    SignTaskAction,
-    SignTaskRunSummary,
-} from "../../../lib/api";
-import {
-    Plus,
-    Play,
-    PencilSimple,
-    Trash,
-    Spinner,
-    Clock,
-    ChatCircleText,
-    Hourglass,
-    ArrowClockwise,
-    ListDashes,
-    DotsThreeVertical,
-    Robot,
-    MathOperations,
-    Copy,
-    ClipboardText,
-    Lightning,
-    CaretLeft,
-    Gear,
-    SignOut
-} from "@phosphor-icons/react";
+import { listSignTasks, deleteSignTask, runSignTask, getSignTaskHistory, getAccountChats, refreshAccountChats, searchAccountChats, createSignTask, updateSignTask, setSignTaskEnabled, exportSignTask, importSignTask, getSchedulerStatus, SignTask, SignTaskChat, SignTaskHistoryItem, ChatInfo, CreateSignTaskRequest, SchedulerStatus } from "../../../lib/api";
+import { Plus, Trash, Spinner, ArrowClockwise, ListDashes, DotsThreeVertical, Robot, MathOperations, Copy, ClipboardText, Lightning, CaretLeft, Gear, SignOut } from "@phosphor-icons/react";
 import { ToastContainer, useToast } from "../../../components/ui/toast";
 import { PageLoading } from "../../../components/ui/page-loading";
 import { EmptyState } from "../../../components/ui/empty-state";
@@ -62,847 +20,22 @@ import { AppFooter } from "../../../components/app-footer";
 import { cn } from "../../../lib/utils";
 import { useLanguage } from "../../../context/LanguageContext";
 
+import { HistoryLogView, formatFlowDateTime, runSummaryStatusLabel, runSummaryTone, compactRunSummaryParts, getHistoryDiagnostics, formatHistoryForAi, formatHistoryRawJson, HistoryFlowGroups } from "./task-history";
+
+import { TaskItem } from "./task-item";
+
+import { ActionTypeOption, TaskFormAction, isSuccessAssertionAction, TaskFormState, defaultTaskAction, toSuccessKeywords, toTaskFormAction, DICE_OPTIONS } from "./task-form";
+
+import { TaskAdvancedSettings } from "./task-advanced-settings";
+import { chatToForm, formToChat, replaceEditedChat, findInvalidChatIndex } from "./task-form";
+
+import { getNewRunResult } from "./task-history";
+
+import { useTaskMonitor } from "./use-task-monitor";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const flowStageLabel = (stage: string, isZh: boolean) => {
-    if (isZh) {
-        switch (stage) {
-            case "task": return "任务";
-            case "session": return "会话";
-            case "preheat": return "预热";
-            case "action": return "动作";
-            case "message": return "消息";
-            case "result": return "结果";
-            default: return "步骤";
-        }
-    }
-    switch (stage) {
-        case "task": return "Task";
-        case "session": return "Session";
-        case "preheat": return "Preheat";
-        case "action": return "Action";
-        case "message": return "Message";
-        case "result": return "Result";
-        default: return "Step";
-    }
-};
-
-type TaskHistoryStepGroup = {
-    index: number;
-    title: string;
-    items: SignTaskFlowItem[];
-};
-
-type HistoryLogView = "read" | "ai" | "json";
-
-const HISTORY_META_KEYS = new Set([
-    "chat_id",
-    "message_id",
-    "source",
-    "source_message_id",
-    "timeout",
-    "keyword",
-    "keywords",
-    "attempt",
-    "total_attempts",
-    "retry_count",
-    "action",
-    "button_text",
-    "target_text",
-    "option_text",
-    "selected_index",
-    "reply_to_message",
-    "status",
-    "result",
-    "reason",
-    "error",
-    "error_type",
-]);
-
-const getTaskHistoryStepStatus = (items: SignTaskFlowItem[]) => {
-    if (items.some((item) => item.level === "error")) {
-        return "failed" as const;
-    }
-    if (items.some((item) => item.level === "success")) {
-        return "success" as const;
-    }
-    return "running" as const;
-};
-
-const formatFlowDateTime = (value: string | undefined, language: string) => {
-    if (!value) return "--";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString(language === "zh" ? "zh-CN" : "en-US", { hour12: false });
-};
-
-const formatFlowTime = (value: string | undefined, language: string) => {
-    if (!value) return "--:--:--";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleTimeString(language === "zh" ? "zh-CN" : "en-US", { hour12: false });
-};
-
-const formatDuration = (start?: string, end?: string, isZh = true) => {
-    if (!start || !end) return "--";
-    const startMs = new Date(start).getTime();
-    const endMs = new Date(end).getTime();
-    if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) return "--";
-    const seconds = Math.max(1, Math.round((endMs - startMs) / 1000));
-    if (seconds < 60) return isZh ? `${seconds}秒` : `${seconds}s`;
-    const minutes = Math.floor(seconds / 60);
-    const restSeconds = seconds % 60;
-    return isZh ? `${minutes}分${restSeconds}秒` : `${minutes}m ${restSeconds}s`;
-};
-
-const cleanFlowText = (text: string | undefined) => (text || "").replace(/^账户「.*?」- 任务「.*?」:\s*/, "");
-
-const humanizeActionText = (raw: string | undefined, isZh: boolean) => {
-    const text = (raw || "").trim();
-    if (!text) return isZh ? "执行步骤" : "Run step";
-
-    const textValue = text.match(/text='([^']*)'/)?.[1] || text.match(/text="([^"]*)"/)?.[1];
-    const keywordsValue = text.match(/keywords=\[([^\]]*)\]/)?.[1];
-
-    if (text.includes("SEND_TEXT")) {
-        return isZh ? `发送文本「${textValue || "-"}」` : `Send text "${textValue || "-"}"`;
-    }
-    if (text.includes("CLICK_KEYBOARD_BY_TEXT")) {
-        return isZh ? `点击按钮「${textValue || "-"}」` : `Click button "${textValue || "-"}"`;
-    }
-    if (text.includes("ASSERT_SUCCESS") || text.includes("ASSERT_SUCCESS_BY_TEXT")) {
-        return isZh ? `判断成功关键字「${keywordsValue || textValue || "-"}」` : `Assert success keywords "${keywordsValue || textValue || "-"}"`;
-    }
-    if (text.includes("SEND_DICE")) {
-        return isZh ? "发送骰子" : "Send dice";
-    }
-    if (text.includes("IMAGE") || text.includes("VISION")) {
-        return isZh ? "识图处理" : "Image recognition";
-    }
-    if (text.includes("CALCULATION")) {
-        return isZh ? "计算题处理" : "Calculation challenge";
-    }
-    if (text.includes("POETRY")) {
-        return isZh ? "诗词填空处理" : "Poetry fill challenge";
-    }
-
-    return cleanFlowText(text);
-};
-
-const formatHistoryStepTitle = (index: number, firstItem: SignTaskFlowItem, isZh: boolean) => {
-    const actionText = firstItem.meta?.action;
-    if (typeof actionText === "string" && actionText.trim()) {
-        return `${isZh ? "步骤" : "Step"} ${index} · ${humanizeActionText(actionText, isZh)}`;
-    }
-    const itemText = cleanFlowText(firstItem.text).trim();
-    if (itemText) {
-        return `${isZh ? "步骤" : "Step"} ${index} · ${humanizeActionText(itemText, isZh)}`;
-    }
-    return `${isZh ? "步骤" : "Step"} ${index}`;
-};
-
-const isVisibleFlowItem = (item: SignTaskFlowItem) => item.text_visible !== false;
-
-const visibleFlowItems = (items: SignTaskFlowItem[] | undefined) => (items || []).filter(isVisibleFlowItem);
-
-const groupHistoryFlowItemsByStep = (flowItems: SignTaskFlowItem[] | undefined, isZh: boolean): TaskHistoryStepGroup[] => {
-    if (!flowItems || flowItems.length === 0) {
-        return [];
-    }
-
-    const groups: TaskHistoryStepGroup[] = [];
-    let currentGroup: TaskHistoryStepGroup | null = null;
-
-    const finalizeCurrentGroup = () => {
-        if (!currentGroup || currentGroup.items.length === 0) return;
-        groups.push(currentGroup);
-        currentGroup = null;
-    };
-
-    for (const item of flowItems) {
-        if (!currentGroup) {
-            const nextIndex = groups.length + 1;
-            currentGroup = {
-                index: nextIndex,
-                title: formatHistoryStepTitle(nextIndex, item, isZh),
-                items: [item],
-            };
-            continue;
-        }
-
-        currentGroup.items.push(item);
-    }
-
-    finalizeCurrentGroup();
-    return groups;
-};
-
-const runSummaryStatusLabel = (summary: SignTaskRunSummary | undefined, isZh: boolean) => {
-    switch (summary?.status) {
-        case "checked": return isZh ? "已签到" : "Checked";
-        case "success": return isZh ? "成功" : "Success";
-        case "failed": return isZh ? "失败" : "Failed";
-        default: return summary?.success ? (isZh ? "成功" : "Success") : (isZh ? "失败" : "Failed");
-    }
-};
-
-const runSummaryTone = (summary: SignTaskRunSummary | undefined, fallbackSuccess?: boolean) => {
-    if (summary?.status === "checked" || summary?.status === "success" || summary?.success) return "success";
-    if (summary?.status === "failed" || fallbackSuccess === false) return "danger";
-    return "neutral";
-};
-
-const RUN_SUMMARY_TIMEOUT_COUNT_KEYS = [
-    "event",
-    "response_action",
-    "callback_outer",
-    "send_rpc",
-    "media_rpc",
-    "ai_rpc",
-    "task_run",
-    "client_rpc",
-    "client_rpc_late_cancelled",
-    "client_rpc_late_completed",
-    "client_rpc_late_exception",
-    "client_startup_retry",
-    "client_startup_lock",
-    "client_exit_lock",
-    "client_close_lock",
-    "task_run_late_cancelled",
-    "task_run_late_completed",
-    "task_run_late_exception",
-    "late_cancelled",
-    "late_completed",
-    "late_exception",
-] as const satisfies readonly (keyof NonNullable<SignTaskRunSummary["timeouts"]>)[];
-
-const compactRunSummaryParts = (summary: SignTaskRunSummary | undefined, isZh: boolean) => {
-    if (!summary) return [];
-    const parts: string[] = [];
-    if (summary.total_attempts) {
-        parts.push(`${isZh ? "尝试" : "attempt"} ${summary.attempt || 0}/${summary.total_attempts}`);
-    }
-    const trustedTimeouts = summary.callbacks?.trusted_timeout || 0;
-    if (trustedTimeouts > 0) {
-        parts.push(`${isZh ? "可信回调超时" : "trusted callbacks"} ${trustedTimeouts}`);
-    }
-    const callbackOuterTimeouts = summary.callbacks?.outer_timeouts || 0;
-    if (callbackOuterTimeouts > trustedTimeouts) {
-        parts.push(`${isZh ? "回调外层超时" : "callback outer timeouts"} ${callbackOuterTimeouts}`);
-    }
-    const callbackInvalidAfterTimeout = summary.callbacks?.data_invalid_after_timeout || 0;
-    if (callbackInvalidAfterTimeout > 0) {
-        parts.push(`${isZh ? "回调数据失效" : "callback data expired"} ${callbackInvalidAfterTimeout}`);
-    }
-    const historyHandled = summary.history?.messages_handled || 0;
-    if (historyHandled > 0) {
-        parts.push(`${isZh ? "历史补漏" : "history rescue"} ${historyHandled}`);
-    }
-    const duplicateMessages = (summary.messages?.skipped_duplicate || 0)
-        + (summary.messages?.skipped_concurrent_duplicate || 0)
-        + (summary.history?.duplicate_messages || 0);
-    if (duplicateMessages > 0) {
-        parts.push(`${isZh ? "重复消息" : "duplicate messages"} ${duplicateMessages}`);
-    }
-    const finishedSkips = summary.messages?.skipped_finished || 0;
-    if (finishedSkips > 0) {
-        parts.push(`${isZh ? "迟到消息" : "late messages"} ${finishedSkips}`);
-    }
-    const historyFailedScans = summary.history?.failed_scans || 0;
-    if (historyFailedScans > 0) {
-        parts.push(`${isZh ? "历史查询失败" : "history failures"} ${historyFailedScans}`);
-    }
-    if (summary.history?.rescue_suspended) {
-        parts.push(isZh ? "历史补漏暂停" : "history rescue paused");
-    }
-    const retrySuppressed = summary.retry_suppressed_count || 0;
-    if (retrySuppressed > 0) {
-        parts.push(`${isZh ? "抑制重试" : "suppressed retries"} ${retrySuppressed}`);
-    }
-    if (summary.retry?.limit_exceeded) {
-        parts.push(isZh ? "重试耗尽" : "retry limit exceeded");
-    }
-    const timeoutTotal = typeof summary.timeouts?.timeout_count_total === "number"
-        ? summary.timeouts.timeout_count_total
-        : RUN_SUMMARY_TIMEOUT_COUNT_KEYS.reduce<number>((total, key) => {
-            const value = summary.timeouts?.[key];
-            return typeof value === "number" ? total + value : total;
-        }, 0);
-    if (timeoutTotal > 0) {
-        parts.push(`${isZh ? "超时" : "timeouts"} ${timeoutTotal}`);
-    }
-    if (summary.cleanup?.failed) {
-        const timeout = summary.cleanup.timeout_seconds ? `/${summary.cleanup.timeout_seconds}s` : "";
-        parts.push(`${isZh ? "清理失败" : "cleanup failed"}${timeout}`);
-    }
-    const lockWait = Number(summary.account_lock?.wait_seconds || 0);
-    if (lockWait > 0.5) {
-        parts.push(`${isZh ? "锁等待" : "lock wait"} ${lockWait}s`);
-    }
-    return parts;
-};
-
-const formatInlineMeta = (meta: SignTaskFlowItem["meta"] | undefined, detailed = false, text?: string) => {
-    if (!meta) return "";
-    const sourceText = cleanFlowText(text || "");
-    const entries = Object.entries(meta).filter(([key, value]) => {
-        if (!detailed && !HISTORY_META_KEYS.has(key)) return false;
-        const pair = `${key}=${String(value)}`;
-        const colonPair = `${key}: ${String(value)}`;
-        return !sourceText.includes(pair) && !sourceText.includes(colonPair);
-    });
-    return entries.map(([key, value]) => `${key}=${String(value)}`).join(" · ");
-};
-
-const getHistoryDiagnostics = (log: SignTaskHistoryItem | undefined, isZh: boolean) => {
-    const items = visibleFlowItems(log?.flow_items);
-    const groups = groupHistoryFlowItemsByStep(items, isZh);
-    const errorItem = [...items].reverse().find((item) => item.level === "error");
-    const warningItem = [...items].reverse().find((item) => item.level === "warning");
-    const failedGroup = [...groups].reverse().find((group) => getTaskHistoryStepStatus(group.items) === "failed" || group.items.some((item) => item.level === "warning"));
-    const failureIndex = errorItem || warningItem ? items.findIndex((item) => item === (errorItem || warningItem)) : items.length;
-    const lastSuccessItem = items.slice(0, failureIndex >= 0 ? failureIndex : items.length).reverse().find((item) => item.level === "success");
-    const start = items[0]?.ts;
-    const end = items[items.length - 1]?.ts || log?.time;
-    const completedSteps = groups.filter((group) => getTaskHistoryStepStatus(group.items) === "success").length;
-
-    return {
-        groups,
-        directReason: cleanFlowText(errorItem?.text || warningItem?.text || log?.message || items[items.length - 1]?.text || ""),
-        failedStage: failedGroup?.title || (errorItem || warningItem ? flowStageLabel((errorItem || warningItem)!.stage, isZh) : "--"),
-        lastSuccess: lastSuccessItem ? cleanFlowText(lastSuccessItem.text) : "--",
-        duration: formatDuration(start, end, isZh),
-        completedSteps,
-        totalSteps: groups.length,
-        errorItem,
-        warningItem,
-    };
-};
-
-const formatHistoryTimelineText = (log: SignTaskHistoryItem, language: string, failureOnly = false) => {
-    const items = visibleFlowItems(log.flow_items);
-    const visibleItems = failureOnly ? items.filter((item) => item.level === "error" || item.level === "warning") : items;
-    if (visibleItems.length > 0) {
-        return visibleItems.map((item) => {
-            const meta = formatInlineMeta(item.meta, false, item.text);
-            return `${formatFlowTime(item.ts, language)} [${item.stage}/${item.level}] ${cleanFlowText(item.text)}${meta ? ` (${meta})` : ""}`;
-        }).join("\n");
-    }
-    return (log.flow_logs || []).join("\n") || log.message || "";
-};
-
-const formatHistoryForAi = ({
-    log,
-    accountName,
-    taskName,
-    language,
-    isZh,
-}: {
-    log: SignTaskHistoryItem;
-    accountName: string;
-    taskName: string;
-    language: string;
-    isZh: boolean;
-}) => {
-    const diagnostics = getHistoryDiagnostics(log, isZh);
-    const summary = log.run_summary;
-    const summaryParts = compactRunSummaryParts(summary, isZh);
-    const humanItems = visibleFlowItems(log.flow_items);
-    const chatId = log.flow_items?.find((item) => item.meta?.chat_id)?.meta?.chat_id;
-    const errorMeta = diagnostics.errorItem?.meta ? JSON.stringify(diagnostics.errorItem.meta, null, 2) : "{}";
-
-    return `# TG Sign Plus 任务排查日志
-
-## 基本信息
-- 账户：${accountName}
-- 任务：${taskName}
-- chat_id：${chatId || "未知"}
-- 执行时间：${formatFlowDateTime(log.time, language)}
-- 执行结果：${log.success ? "成功" : "失败"}
-- 结构化状态：${summary ? runSummaryStatusLabel(summary, isZh) : "无"}
-- 结构化摘要：${summaryParts.length ? summaryParts.join("；") : "无"}
-- 机器人消息：${log.message || "无"}
-- 日志条数：${humanItems.length}${log.flow_items && log.flow_items.length !== humanItems.length ? `（结构化事件 ${log.flow_items.length}）` : ""}
-
-## 失败摘要
-- 失败阶段：${diagnostics.failedStage}
-- 直接原因：${diagnostics.directReason || "未提取到明确原因"}
-- 最后成功动作：${diagnostics.lastSuccess}
-- 步骤进度：${diagnostics.completedSteps}/${diagnostics.totalSteps}
-- 耗时：${diagnostics.duration}
-- 事件诊断：${log.diagnostics?.summary || "未生成"}
-
-## 分步骤时间线
-${diagnostics.groups.map((group) => {
-        const status = getTaskHistoryStepStatus(group.items);
-        return `### ${group.title}（${status}）\n${group.items.map((item) => {
-            const meta = formatInlineMeta(item.meta, false, item.text);
-            return `${formatFlowTime(item.ts, language)} [${item.stage}/${item.level}] ${cleanFlowText(item.text)}${meta ? ` (${meta})` : ""}`;
-        }).join("\n")}`;
-    }).join("\n\n") || "无结构化步骤日志"}
-
-## 原始错误 meta
-\`\`\`json
-${errorMeta}
-\`\`\`
-
-## 原始时间线
-\`\`\`text
-${formatHistoryTimelineText(log, language)}
-\`\`\`
-`;
-};
-
-const formatHistoryRawJson = (log: SignTaskHistoryItem, accountName: string, taskName: string) => JSON.stringify({
-    account_name: accountName,
-    task_name: taskName,
-    history: log,
-}, null, 2);
-
-const HistoryTimeline = ({ items, isZh, language, failureOnly, expandDetails }: {
-    items: SignTaskFlowItem[];
-    isZh: boolean;
-    language: string;
-    failureOnly: boolean;
-    expandDetails: boolean;
-}) => {
-    const humanItems = visibleFlowItems(items);
-    const visibleItems = failureOnly ? humanItems.filter((item) => item.level === "error" || item.level === "warning") : humanItems;
-    if (visibleItems.length === 0) {
-        return <div className="rounded-2xl border border-dashed border-[var(--border-secondary)] bg-[var(--bg-primary)] px-4 py-4 text-sm text-[var(--text-tertiary)]">{isZh ? "当前筛选下没有日志" : "No logs for this filter"}</div>;
-    }
-
-    return (
-        <div className="divide-y divide-[var(--border-secondary)] overflow-hidden rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-primary)]">
-            {visibleItems.map((item, index) => {
-                const compactMeta = formatInlineMeta(item.meta, false, item.text);
-                const allMeta = formatInlineMeta(item.meta, true, item.text);
-                return (
-                    <details key={`${item.ts}-${index}`} open={expandDetails} className={cn("group px-3 py-2.5", item.level === "error" && "border-l-4 border-red-500 bg-red-500/8", item.level === "warning" && "border-l-4 border-amber-500 bg-amber-500/8")}>
-                        <summary className="grid cursor-pointer list-none grid-cols-[70px,76px,minmax(0,1fr)] gap-2 text-[12px] leading-5 md:grid-cols-[82px,90px,minmax(0,1fr)]">
-                            <span className="font-mono tabular-nums text-[var(--text-tertiary)]">{formatFlowTime(item.ts, language)}</span>
-                            <span className={cn("font-semibold uppercase tracking-[0.08em]", item.level === "error" ? "text-red-300" : item.level === "warning" ? "text-amber-300" : item.level === "success" ? "text-emerald-300" : "text-[var(--text-tertiary)]")}>{flowStageLabel(item.stage, isZh)}</span>
-                            <span className="min-w-0 break-words text-[var(--text-primary)]">
-                                {cleanFlowText(item.text)}
-                                {compactMeta ? <span className="ml-2 text-[10px] text-[var(--text-tertiary)]">{compactMeta}</span> : null}
-                            </span>
-                        </summary>
-                        {allMeta ? <div className="mt-2 rounded-xl bg-[var(--bg-tertiary)] px-3 py-2 font-mono text-[10px] leading-5 text-[var(--text-secondary)] break-all">{allMeta}</div> : null}
-                    </details>
-                );
-            })}
-        </div>
-    );
-};
-
-const HistoryFlowGroups = ({
-    flowItems,
-    isZh,
-    language,
-    t,
-    failureOnly,
-    expandDetails,
-}: {
-    flowItems: SignTaskFlowItem[];
-    isZh: boolean;
-    language: string;
-    t: (key: string) => string;
-    failureOnly: boolean;
-    expandDetails: boolean;
-}) => {
-    const humanItems = visibleFlowItems(flowItems);
-    const stepGroups = groupHistoryFlowItemsByStep(humanItems, isZh);
-    if (stepGroups.length === 0) {
-        return <HistoryTimeline items={humanItems} isZh={isZh} language={language} failureOnly={failureOnly} expandDetails={expandDetails} />;
-    }
-
-    const visibleGroups = failureOnly ? stepGroups.filter((group) => getTaskHistoryStepStatus(group.items) === "failed" || group.items.some((item) => item.level === "warning")) : stepGroups;
-
-    return (
-        <div className="space-y-4">
-            {visibleGroups.map((group) => {
-                const status = getTaskHistoryStepStatus(group.items);
-                return (
-                    <section key={`step-${group.index}-${group.items[0]?.ts ?? group.index}`} className="space-y-2">
-                        <div className="flex flex-col gap-2 border-b border-[var(--border-secondary)] pb-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                                <div className="break-words text-sm font-semibold text-[var(--text-primary)]">{group.title}</div>
-                                <div className="mt-1 text-xs text-[var(--text-tertiary)]">{group.items.length} {isZh ? "条日志" : "events"}</div>
-                            </div>
-                            <StatusBadge tone={status === "failed" ? "danger" : status === "success" ? "success" : "warning"}>
-                                {status === "failed" ? t("failure") : status === "success" ? t("success") : (isZh ? "进行中" : "Running")}
-                            </StatusBadge>
-                        </div>
-                        <HistoryTimeline items={group.items} isZh={isZh} language={language} failureOnly={failureOnly} expandDetails={expandDetails} />
-                    </section>
-                );
-            })}
-        </div>
-    );
-};
-
 type TaskFilterKey = "all" | "enabled" | "disabled" | "success" | "failed" | "pending" | "unregistered";
-
-type ActionTypeOption = "1" | "2" | "3" | "ai_vision" | "ai_logic" | "ai_poetry" | "assert_success";
-
-type SuccessAssertionFormAction = {
-    action: 9;
-    keywords: string[];
-    raw_input: string;
-};
-type TaskFormAction = Exclude<SignTaskAction, { action: 9; keywords: string[] }> | SuccessAssertionFormAction;
-
-const isSuccessAssertionAction = (action: TaskFormAction | SignTaskAction | null | undefined): action is SuccessAssertionFormAction | { action: 9; keywords: string[] } => {
-    return Number(action?.action) === 9;
-};
-
-type TaskFormState = {
-    name?: string;
-    sign_at: string;
-    random_minutes: number;
-    retry_count: number;
-    chat_id: number;
-    chat_id_manual: string;
-    chat_name: string;
-    actions: TaskFormAction[];
-    delete_after: number | undefined;
-    event_timeout: number | undefined;
-    event_retries: number | undefined;
-    event_retry_wait: number | undefined;
-    event_history_limit: number | undefined;
-    event_history_failure_threshold: number | undefined;
-    event_history_rescue_interval: number | undefined;
-    event_history_rpc_timeout: number | undefined;
-    event_history_result_max_age: number | undefined;
-    event_action_timeout: number | undefined;
-    event_send_timeout: number | undefined;
-    event_media_timeout: number | undefined;
-    event_ai_timeout: number | undefined;
-    event_callback_timeout: number | undefined;
-    event_callback_retries: number | undefined;
-    event_ai_fallback: boolean | undefined;
-    execution_mode: "fixed" | "range";
-    range_start: string;
-    range_end: string;
-};
-
-const defaultTaskAction = (): TaskFormAction => ({ action: 1, text: "" });
-const toSuccessKeywords = (value: string) => value.split("#").map((item) => item.trim()).filter(Boolean);
-const normalizeTaskActions = (actions: TaskFormAction[]): SignTaskAction[] => actions.map((action) => {
-    if (isSuccessAssertionAction(action)) {
-        return {
-            action: 9,
-            keywords: toSuccessKeywords(action.raw_input),
-        };
-    }
-    if (action.action === 6) {
-        const captionPattern = action.caption_pattern?.trim();
-        const captchaLengths = (action.captcha_lengths || []).filter((item) => Number.isInteger(item) && item > 0);
-        const captchaCharset = action.captcha_charset?.trim();
-        return {
-            action: 6,
-            ...(captionPattern ? { caption_pattern: captionPattern } : {}),
-            ...(captchaLengths.length > 0 ? { captcha_lengths: captchaLengths } : {}),
-            ...(captchaCharset ? { captcha_charset: captchaCharset } : {}),
-            ...(action.captcha_case && action.captcha_case !== "preserve" ? { captcha_case: action.captcha_case } : {}),
-            ...(action.reply_to_message ? { reply_to_message: true } : {}),
-        };
-    }
-    return action;
-});
-const toTaskFormAction = (action: SignTaskAction): TaskFormAction => {
-    if (isSuccessAssertionAction(action)) {
-        return {
-            ...action,
-            raw_input: action.keywords.join(" # "),
-        };
-    }
-    if (action.action === 6) {
-        return {
-            action: 6,
-            caption_pattern: action.caption_pattern || "",
-            captcha_lengths: action.captcha_lengths || [],
-            captcha_charset: action.captcha_charset || "",
-            captcha_case: action.captcha_case || "preserve",
-            reply_to_message: Boolean(action.reply_to_message),
-        };
-    }
-    return action;
-};
-
-const DICE_OPTIONS = [
-    "\uD83C\uDFB2",
-    "\uD83C\uDFAF",
-    "\uD83C\uDFC0",
-    "\u26BD",
-    "\uD83C\uDFB3",
-    "\uD83C\uDFB0",
-] as const;
-
-// Memoized Task Item Component
-const TaskItem = memo(({ task, loading, isRunning, schedulerItem, schedulerTimezone, onEdit, onRun, onToggleEnabled, onViewLogs, onCopy, onDelete, t, language }: {
-    task: SignTask;
-    loading: boolean;
-    isRunning: boolean;
-    schedulerItem?: SchedulerStatus["sign_tasks"][number];
-    schedulerTimezone?: string;
-    onEdit: (task: SignTask) => void;
-    onRun: (name: string) => void;
-    onToggleEnabled: (task: SignTask) => void;
-    onViewLogs: (task: SignTask) => void;
-    onCopy: (name: string) => void;
-    onDelete: (name: string) => void;
-    t: (key: string) => string;
-    language: string;
-}) => {
-    const copyTaskTitle = language === "zh" ? "复制任务" : "Copy Task";
-    const moreActionsTitle = language === "zh" ? "更多操作" : "More actions";
-    const [showActions, setShowActions] = useState(false);
-    const menuRef = useRef<HTMLDivElement | null>(null);
-
-    useEffect(() => {
-        if (!showActions) return;
-
-        const handlePointerDown = (event: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-                setShowActions(false);
-            }
-        };
-
-        const handleEscape = (event: KeyboardEvent) => {
-            if (event.key === "Escape") {
-                setShowActions(false);
-            }
-        };
-
-        document.addEventListener("mousedown", handlePointerDown);
-        document.addEventListener("keydown", handleEscape);
-        return () => {
-            document.removeEventListener("mousedown", handlePointerDown);
-            document.removeEventListener("keydown", handleEscape);
-        };
-    }, [showActions]);
-
-    const closeActions = () => setShowActions(false);
-    const lastRunSummary = task.last_run?.run_summary;
-    const lastRunSummaryParts = compactRunSummaryParts(lastRunSummary, language === "zh");
-
-    return (
-        <div className="glass-panel group flex h-full flex-col p-4 transition-all hover:border-[var(--accent)] md:p-5">
-            <div className="min-w-0 flex items-start gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-muted)] text-[var(--accent)]">
-                    <ChatCircleText weight="bold" size={20} />
-                </div>
-                <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                        <h3 className="truncate text-sm font-bold" title={task.name}>{task.name}</h3>
-                        <span className="rounded border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--text-tertiary)]">
-                            {task.chats[0]?.chat_id || "-"}
-                        </span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <StatusBadge tone={task.enabled ? "success" : "warning"}>
-                            {task.enabled ? (language === "zh" ? "自动调度" : "Auto") : (language === "zh" ? "已暂停自动" : "Paused")}
-                        </StatusBadge>
-                        {task.enabled ? (
-                            <StatusBadge tone={schedulerItem?.job_exists ? "success" : "danger"}>
-                                {schedulerItem?.job_exists ? (language === "zh" ? "已注册" : "Registered") : (language === "zh" ? "未注册" : "Missing")}
-                            </StatusBadge>
-                        ) : null}
-                        {task.enabled && task.execution_mode === "range" && schedulerItem?.execution_job_exists && schedulerItem?.next_scheduled_at ? (
-                            <StatusBadge tone="primary">
-                                {language === "zh" ? "已调度" : "Scheduled"}
-                            </StatusBadge>
-                        ) : null}
-                    </div>
-                </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-4 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-                        {language === "zh" ? "调度" : "Schedule"}
-                    </div>
-                    <div className="mt-2 flex items-center gap-2 text-[var(--text-primary)]">
-                        <Clock weight="bold" size={14} />
-                        <span className="font-mono text-xs font-semibold uppercase tracking-wide">
-                            {task.execution_mode === "range" && task.range_start && task.range_end
-                                ? `${task.range_start} - ${task.range_end}`
-                                : task.sign_at}
-                        </span>
-                    </div>
-                    {task.random_seconds > 0 ? (
-                        <div className="mt-2 flex items-center gap-1 text-xs text-[var(--accent)]">
-                            <Hourglass weight="bold" size={12} />
-                            <span>~{Math.round(task.random_seconds / 60)}m</span>
-                        </div>
-                        ) : null}
-                </div>
-
-                <div className="rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-4 py-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-                        {language === "zh" ? "下一次执行" : "Next run"}
-                    </div>
-                    {!task.enabled ? (
-                        <div className="mt-2 text-xs text-[var(--text-tertiary)]">
-                            {language === "zh" ? "已暂停，可手动运行" : "Paused; manual run available"}
-                        </div>
-                    ) : task.execution_mode === "range" && schedulerItem?.execution_job_exists && schedulerItem?.next_scheduled_at ? (
-                        <div className="mt-2 text-xs text-[var(--text-primary)]">
-                            <span className="text-[var(--text-tertiary)]">
-                                {language === "zh" ? "预计: " : "Scheduled: "}
-                            </span>
-                            <span className="font-semibold">
-                                {new Date(schedulerItem.next_scheduled_at).toLocaleString(language === "zh" ? "zh-CN" : "en-US", {
-                                    timeZone: schedulerTimezone || "Asia/Shanghai",
-                                    month: "2-digit",
-                                    day: "2-digit",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                    second: "2-digit"
-                                })}
-                            </span>
-                        </div>
-                    ) : (
-                        <div className="mt-2 break-words text-xs text-[var(--text-primary)]">
-                            {schedulerItem?.effective_next_run
-                                ? new Date(schedulerItem.effective_next_run).toLocaleString(language === "zh" ? "zh-CN" : "en-US", {
-                                    timeZone: schedulerTimezone || "Asia/Shanghai"
-                                })
-                                : (language === "zh" ? "未计划" : "Not scheduled")}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-4 py-3">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-                    {language === "zh" ? "最近执行" : "Last run"}
-                </div>
-                {task.last_run ? (
-                    <div className="mt-2 space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <StatusBadge tone={runSummaryTone(lastRunSummary, task.last_run.success) as any}>
-                                {lastRunSummary ? runSummaryStatusLabel(lastRunSummary, language === "zh") : (task.last_run.success ? t("success") : t("failure"))}
-                            </StatusBadge>
-                            <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
-                                {new Date(task.last_run.time).toLocaleString(language === "zh" ? "zh-CN" : "en-US", {
-                                    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
-                                })}
-                            </span>
-                        </div>
-                        {lastRunSummaryParts.length > 0 ? (
-                            <div className="flex flex-wrap gap-1.5">
-                                {lastRunSummaryParts.slice(0, 3).map((part) => (
-                                    <span key={part} className="rounded-md border border-[var(--border-secondary)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">
-                                        {part}
-                                    </span>
-                                ))}
-                            </div>
-                        ) : null}
-                    </div>
-                ) : (
-                    <div className="mt-2">
-                        <StatusBadge tone="neutral">{t("no_data")}</StatusBadge>
-                    </div>
-                )}
-            </div>
-
-            <div className="mt-4 flex flex-nowrap items-center gap-1.5 border-t border-[var(--border-secondary)] pt-4 sm:gap-2">
-                <Button
-                    size="sm"
-                    onClick={() => {
-                        closeActions();
-                        onRun(task.name);
-                    }}
-                    disabled={loading || isRunning}
-                    className="shrink-0 whitespace-nowrap px-2 sm:px-3"
-                >
-                    {isRunning ? <Spinner className="animate-spin" size={14} /> : <Play weight="fill" size={14} />}
-                    {t("run")}
-                </Button>
-
-                <div className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5 sm:gap-2">
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => onViewLogs(task)}
-                        disabled={loading || isRunning}
-                        className="shrink-0 whitespace-nowrap px-2 sm:px-3"
-                    >
-                        <ListDashes weight="bold" size={14} />
-                        {language === "zh" ? "日志" : "Logs"}
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => onToggleEnabled(task)}
-                        disabled={loading || isRunning}
-                        className="shrink-0 whitespace-nowrap px-2 sm:px-3"
-                    >
-                        <Clock weight="bold" size={14} />
-                        {task.enabled ? (language === "zh" ? "暂停" : "Pause") : (language === "zh" ? "恢复" : "Resume")}
-                    </Button>
-                    <div ref={menuRef} className="relative shrink-0">
-                        <IconButton
-                            onClick={() => setShowActions((prev) => !prev)}
-                            disabled={loading || isRunning}
-                            activeTone="primary"
-                            className="!h-8 !w-8"
-                            title={moreActionsTitle}
-                            aria-label={moreActionsTitle}
-                        >
-                            <DotsThreeVertical weight="bold" size={14} />
-                        </IconButton>
-
-                        {showActions ? (
-                            <div className="absolute right-0 top-full z-20 mt-2 min-w-[180px] rounded-2xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-1.5 shadow-[var(--shadow-lg)]">
-                                <button
-                                    type="button"
-                                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-tertiary)] disabled:cursor-not-allowed disabled:opacity-50"
-                                    onClick={() => {
-                                        closeActions();
-                                        onEdit(task);
-                                    }}
-                                    disabled={loading || isRunning}
-                                >
-                                    <PencilSimple weight="bold" size={14} />
-                                    <span>{language === "zh" ? "编辑任务" : "Edit task"}</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-tertiary)] disabled:cursor-not-allowed disabled:opacity-50"
-                                    onClick={() => {
-                                        closeActions();
-                                        onCopy(task.name);
-                                    }}
-                                    disabled={loading || isRunning}
-                                >
-                                    <Copy weight="bold" size={14} />
-                                    <span>{copyTaskTitle}</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-[var(--danger)] transition-colors hover:bg-[var(--danger-muted)] disabled:cursor-not-allowed disabled:opacity-50"
-                                    onClick={() => {
-                                        closeActions();
-                                        onDelete(task.name);
-                                    }}
-                                    disabled={loading || isRunning}
-                                >
-                                    <Trash weight="bold" size={14} />
-                                    <span>{t("delete")}</span>
-                                </button>
-                            </div>
-                        ) : null}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-});
-
-TaskItem.displayName = "TaskItem";
 
 export default function AccountTasksContent() {
     const router = useRouter();
@@ -924,6 +57,7 @@ export default function AccountTasksContent() {
     const [chatSearchLoading, setChatSearchLoading] = useState(false);
     const [loading, setLoading] = useState(false);
     const [runningTaskName, setRunningTaskName] = useState<string | null>(null);
+    const runHistoryBaseline = useRef<{ account: string; task: string; time: string | null | undefined } | null>(null);
     const [liveMonitorTaskName, setLiveMonitorTaskName] = useState<string | null>(null);
     const [refreshingChats, setRefreshingChats] = useState(false);
     const [chatCacheMeta, setChatCacheMeta] = useState<{ last_cached_at?: string | null; cache_ttl_minutes: number; expired: boolean; count: number } | null>(null);
@@ -1003,6 +137,9 @@ export default function AccountTasksContent() {
 
     // 缂傚倸鍊搁崐鎼佸磹瑜版帗鍋嬮柣鎰仛椤愯姤銇勯幇鍓佹偧妞も晝鍏橀幃褰掑炊閵娿儳绁峰銈庡亖閸婃繈骞冨Δ鍛仺婵炲牊瀵ч弫顖炴⒑娴兼瑧鐣虫俊顐㈠閵?
     const [showEditDialog, setShowEditDialog] = useState(false);
+    const [editingChats, setEditingChats] = useState<SignTaskChat[]>([]);
+    const [editingChatIndex, setEditingChatIndex] = useState(0);
+    const [editingRandomSeconds, setEditingRandomSeconds] = useState(0);
     const [editingTaskName, setEditingTaskName] = useState("");
     const [editTask, setEditTask] = useState<TaskFormState>({
         sign_at: "0 6 * * *",
@@ -1284,92 +421,37 @@ export default function AccountTasksContent() {
 
     useEffect(() => {
         if (!token || !historyTaskName) return;
-        const timer = setInterval(async () => {
+        let stopped = false;
+        let timer: ReturnType<typeof setTimeout>;
+        const refresh = async () => {
             try {
-                const [logs, latestTasks, latestSchedulerStatus] = await Promise.all([
-                    getSignTaskHistory(historyTaskName, accountName, 30),
-                    listSignTasks(accountName),
-                    getSchedulerStatus(accountName),
-                ]);
-                setHistoryLogs(logs);
-                setTasks(latestTasks);
-                setSchedulerStatus(latestSchedulerStatus);
-            } catch {}
-        }, 2000);
-        return () => clearInterval(timer);
+                const logs = await getSignTaskHistory(historyTaskName, accountName, 30);
+                if (!stopped) setHistoryLogs(logs);
+            } catch { /* Keep existing history while offline. */ }
+            if (!stopped) timer = setTimeout(refresh, 5000);
+        };
+        timer = setTimeout(refresh, 5000);
+        return () => { stopped = true; clearTimeout(timer); };
     }, [token, historyTaskName, accountName]);
 
-    useEffect(() => {
-        if (!token || !liveMonitorTaskName) return;
-        let closedByCleanup = false;
-        let completionNotified = false;
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = window.location.host;
-        const wsParams = new URLSearchParams({ token, account_name: accountName });
-        const wsUrl = `${protocol}//${host}/api/sign-tasks/ws/${encodeURIComponent(liveMonitorTaskName)}?${wsParams.toString()}`;
-        const ws = new WebSocket(wsUrl);
-
-        ws.onmessage = async (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === "done") {
-                completionNotified = true;
-                setRunningTaskName(null);
-                setLiveMonitorTaskName(null);
-                try {
-                    const currentHistoryTaskName = historyTaskNameRef.current;
-                    const [latestTasks, latestRunLogs, currentHistoryLogs, latestSchedulerStatus] = await Promise.all([
-                        listSignTasks(accountName),
-                        getSignTaskHistory(liveMonitorTaskName, accountName, 1),
-                        currentHistoryTaskName ? getSignTaskHistory(currentHistoryTaskName, accountName, 30) : Promise.resolve(null),
-                        getSchedulerStatus(accountName),
-                    ]);
-                    setTasks(latestTasks);
-                    setSchedulerStatus(latestSchedulerStatus);
-                    if (currentHistoryLogs) {
-                        setHistoryLogs(currentHistoryLogs);
-                    }
-                    const latestEntry = latestRunLogs?.[0];
-                    if (latestEntry) {
-                        addToast(
-                            latestEntry.success
-                                ? (isZh ? `任务 ${liveMonitorTaskName} 执行成功` : `Task ${liveMonitorTaskName} succeeded`)
-                                : (isZh ? `任务 ${liveMonitorTaskName} 执行失败` : `Task ${liveMonitorTaskName} failed`),
-                            latestEntry.success ? "success" : "error"
-                        );
-                    } else {
-                        addToast(
-                            isZh ? `任务 ${liveMonitorTaskName} 已结束` : `Task ${liveMonitorTaskName} finished`,
-                            "success"
-                        );
-                    }
-                } catch {
-                    addToast(
-                        isZh ? `任务 ${liveMonitorTaskName} 已结束` : `Task ${liveMonitorTaskName} finished`,
-                        "success"
-                    );
-                }
-            }
-        };
-
-        ws.onerror = () => {
-            if (!closedByCleanup) {
-                setRunningTaskName(null);
-                setLiveMonitorTaskName(null);
-            }
-        };
-
-        ws.onclose = () => {
-            if (!closedByCleanup && !completionNotified) {
-                setRunningTaskName(null);
-                setLiveMonitorTaskName(null);
-            }
-        };
-
-        return () => {
-            closedByCleanup = true;
-            ws.close();
-        };
-    }, [token, liveMonitorTaskName, accountName, addToast, isZh]);
+    const monitorUnavailable = useTaskMonitor(accountName, liveMonitorTaskName, async () => {
+        const taskName = liveMonitorTaskName;
+        const baseline = runHistoryBaseline.current;
+        setRunningTaskName(null);
+        setLiveMonitorTaskName(null);
+        try {
+            const logs = await getSignTaskHistory(taskName!, accountName, 1, AbortSignal.timeout(10000));
+            const latest = baseline?.account === accountName && baseline.task === taskName
+                ? getNewRunResult(logs, baseline.time) : undefined;
+            addToast(latest
+                ? (latest.success ? (isZh ? `任务 ${taskName} 执行成功` : `Task ${taskName} succeeded`) : (isZh ? `任务 ${taskName} 执行失败` : `Task ${taskName} failed`))
+                : (isZh ? "任务已结束，暂无执行结果" : "Task finished; result unavailable"),
+                latest ? (latest.success ? "success" : "error") : "info");
+        } catch {
+            addToast(isZh ? "任务已结束，但结果暂时无法读取，请稍后查看历史" : "Task finished, but its result is unavailable. Check history later.", "info");
+        }
+        await loadData();
+    });
 
     const handleRefreshChats = async () => {
         const res = await loadChatCache({ forceRefresh: true });
@@ -1422,6 +504,12 @@ export default function AccountTasksContent() {
 
         try {
             setRunningTaskName(taskName);
+            const baseline = { account: accountName, task: taskName, time: undefined as string | null | undefined };
+            try {
+                const history = await getSignTaskHistory(taskName, accountName, 1, AbortSignal.timeout(10000));
+                baseline.time = history[0]?.time ?? null;
+            } catch { /* A missing baseline must never be treated as a confirmed result. */ }
+            runHistoryBaseline.current = baseline;
             const result = await runSignTask(taskName, accountName);
 
             if (result.started) {
@@ -1663,27 +751,7 @@ export default function AccountTasksContent() {
                 account_name: accountName,
                 sign_at: newTask.sign_at,
                 retry_count: newTask.retry_count,
-                chats: [{
-                    chat_id: chatId,
-                    name: newTask.chat_name || t("chat_default_name").replace("{id}", String(chatId)),
-                    actions: normalizeTaskActions(newTask.actions),
-                    delete_after: newTask.delete_after,
-                    event_timeout: newTask.event_timeout,
-                    event_retries: newTask.event_retries,
-                    event_retry_wait: newTask.event_retry_wait,
-                    event_history_limit: newTask.event_history_limit,
-                    event_history_failure_threshold: newTask.event_history_failure_threshold,
-                    event_history_rescue_interval: newTask.event_history_rescue_interval,
-                    event_history_rpc_timeout: newTask.event_history_rpc_timeout,
-                    event_history_result_max_age: newTask.event_history_result_max_age,
-                    event_action_timeout: newTask.event_action_timeout,
-                    event_send_timeout: newTask.event_send_timeout,
-                    event_media_timeout: newTask.event_media_timeout,
-                    event_ai_timeout: newTask.event_ai_timeout,
-                    event_callback_timeout: newTask.event_callback_timeout,
-                    event_callback_retries: newTask.event_callback_retries,
-                    event_ai_fallback: newTask.event_ai_fallback,
-                }],
+                chats: [formToChat(newTask)],
                 random_seconds: newTask.random_minutes * 60,
                 execution_mode: newTask.execution_mode,
                 range_start: newTask.range_start,
@@ -1746,6 +814,9 @@ export default function AccountTasksContent() {
 
     const handleEditTask = (task: SignTask) => {
         setEditingTaskName(task.name);
+        setEditingChats(task.chats);
+        setEditingChatIndex(0);
+        setEditingRandomSeconds(task.random_seconds);
         const chat = task.chats[0];
         setEditTask({
             sign_at: task.sign_at,
@@ -1794,39 +865,28 @@ export default function AccountTasksContent() {
         try {
             setLoading(true);
 
+            const drafts = replaceEditedChat(editingChats, editingChatIndex, editTask);
+            const invalidIndex = findInvalidChatIndex(drafts);
+            if (invalidIndex !== -1) {
+                setEditingChats(drafts);
+                setEditingChatIndex(invalidIndex);
+                setEditTask(prev => ({ ...prev, ...chatToForm(drafts[invalidIndex]) }));
+                addToast(isZh ? `第 ${invalidIndex + 1} 个会话的动作不完整，请补充后保存` : `Complete the actions in chat ${invalidIndex + 1} before saving`, "error");
+                return;
+            }
             await updateSignTask(editingTaskName, {
                 sign_at: editTask.sign_at,
-                random_seconds: editTask.random_minutes * 60,
+                random_seconds: editingRandomSeconds,
                 retry_count: editTask.retry_count,
-                chats: [{
-                    chat_id: chatId,
-                    name: editTask.chat_name || t("chat_default_name").replace("{id}", String(chatId)),
-                    actions: normalizeTaskActions(editTask.actions),
-                    delete_after: editTask.delete_after,
-                    event_timeout: editTask.event_timeout,
-                    event_retries: editTask.event_retries,
-                    event_retry_wait: editTask.event_retry_wait,
-                    event_history_limit: editTask.event_history_limit,
-                    event_history_failure_threshold: editTask.event_history_failure_threshold,
-                    event_history_rescue_interval: editTask.event_history_rescue_interval,
-                    event_history_rpc_timeout: editTask.event_history_rpc_timeout,
-                    event_history_result_max_age: editTask.event_history_result_max_age,
-                    event_action_timeout: editTask.event_action_timeout,
-                    event_send_timeout: editTask.event_send_timeout,
-                    event_media_timeout: editTask.event_media_timeout,
-                    event_ai_timeout: editTask.event_ai_timeout,
-                    event_callback_timeout: editTask.event_callback_timeout,
-                    event_callback_retries: editTask.event_callback_retries,
-                    event_ai_fallback: editTask.event_ai_fallback,
-                }],
+                chats: drafts,
                 execution_mode: editTask.execution_mode,
                 range_start: editTask.range_start,
                 range_end: editTask.range_end,
             }, accountName);
 
             addToast(t("update_success"), "success");
-            setShowEditDialog(false);
             await loadData();
+            setShowEditDialog(false);
         } catch (err: any) {
             addToast(formatErrorMessage("update_failed", err), "error");
         } finally {
@@ -2093,6 +1153,9 @@ export default function AccountTasksContent() {
                 </section>
             </div>
             </main>
+            {monitorUnavailable && <div role="status" className="fixed bottom-20 left-4 right-4 z-50 rounded-xl border border-amber-500 bg-[var(--bg-secondary)] p-3 text-sm">
+                {isZh ? "暂时无法确认任务状态，正在重试连接；任务可能仍在后台运行。" : "Task status unavailable. Reconnecting; the task may still be running."}
+            </div>}
             <AppFooter />
             {toasts && removeToast ? <ToastContainer toasts={toasts} removeToast={removeToast} /> : null}
 
@@ -2169,295 +1232,6 @@ export default function AccountTasksContent() {
                             </select>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 md:col-span-2">
-                                <FormField label={language === "zh" ? "事件总等待秒数" : "Event timeout"} htmlFor="task-event-timeout">
-                                    <Input
-                                        id="task-event-timeout"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="120"
-                                        value={showCreateDialog ? newTask.event_timeout ?? "" : editTask.event_timeout ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(1, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_timeout: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_timeout: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "事件内部重试" : "Event retries"} htmlFor="task-event-retries">
-                                    <Input
-                                        id="task-event-retries"
-                                        type="text"
-                                        inputMode="numeric"
-                                        placeholder="3"
-                                        value={showCreateDialog ? newTask.event_retries ?? "" : editTask.event_retries ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9]/g, "");
-                                            const raw = cleaned === "" ? undefined : parseInt(cleaned, 10);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(0, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_retries: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_retries: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "重试等待秒数" : "Retry wait"} htmlFor="task-event-retry-wait">
-                                    <Input
-                                        id="task-event-retry-wait"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="2"
-                                        value={showCreateDialog ? newTask.event_retry_wait ?? "" : editTask.event_retry_wait ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(0, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_retry_wait: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_retry_wait: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "历史救援条数" : "History scan"} htmlFor="task-event-history-limit">
-                                    <Input
-                                        id="task-event-history-limit"
-                                        type="text"
-                                        inputMode="numeric"
-                                        placeholder="0"
-                                        value={showCreateDialog ? newTask.event_history_limit ?? "" : editTask.event_history_limit ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9]/g, "");
-                                            const raw = cleaned === "" ? undefined : parseInt(cleaned, 10);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(0, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_history_limit: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_history_limit: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "历史失败阈值" : "History failure limit"} htmlFor="task-event-history-failure-threshold">
-                                    <Input
-                                        id="task-event-history-failure-threshold"
-                                        type="text"
-                                        inputMode="numeric"
-                                        placeholder="0"
-                                        value={showCreateDialog ? newTask.event_history_failure_threshold ?? "" : editTask.event_history_failure_threshold ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9]/g, "");
-                                            const raw = cleaned === "" ? undefined : parseInt(cleaned, 10);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(0, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_history_failure_threshold: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_history_failure_threshold: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "历史补漏间隔秒数" : "History rescue interval"} htmlFor="task-event-history-rescue-interval">
-                                    <Input
-                                        id="task-event-history-rescue-interval"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="5"
-                                        value={showCreateDialog ? newTask.event_history_rescue_interval ?? "" : editTask.event_history_rescue_interval ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(0, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_history_rescue_interval: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_history_rescue_interval: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "历史 RPC 超时秒数" : "History RPC timeout"} htmlFor="task-event-history-rpc-timeout">
-                                    <Input
-                                        id="task-event-history-rpc-timeout"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="8"
-                                        value={showCreateDialog ? newTask.event_history_rpc_timeout ?? "" : editTask.event_history_rpc_timeout ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(1, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_history_rpc_timeout: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_history_rpc_timeout: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "历史结果最大年龄秒数" : "History result max age"} htmlFor="task-event-history-result-max-age">
-                                    <Input
-                                        id="task-event-history-result-max-age"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="600"
-                                        value={showCreateDialog ? newTask.event_history_result_max_age ?? "" : editTask.event_history_result_max_age ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(0, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_history_result_max_age: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_history_result_max_age: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "单动作超时秒数" : "Action timeout"} htmlFor="task-event-action-timeout">
-                                    <Input
-                                        id="task-event-action-timeout"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="45"
-                                        value={showCreateDialog ? newTask.event_action_timeout ?? "" : editTask.event_action_timeout ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(1, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_action_timeout: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_action_timeout: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "发送超时秒数" : "Send timeout"} htmlFor="task-event-send-timeout">
-                                    <Input
-                                        id="task-event-send-timeout"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="20"
-                                        value={showCreateDialog ? newTask.event_send_timeout ?? "" : editTask.event_send_timeout ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(1, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_send_timeout: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_send_timeout: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "媒体超时秒数" : "Media timeout"} htmlFor="task-event-media-timeout">
-                                    <Input
-                                        id="task-event-media-timeout"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="30"
-                                        value={showCreateDialog ? newTask.event_media_timeout ?? "" : editTask.event_media_timeout ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(1, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_media_timeout: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_media_timeout: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "AI 超时秒数" : "AI timeout"} htmlFor="task-event-ai-timeout">
-                                    <Input
-                                        id="task-event-ai-timeout"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="45"
-                                        value={showCreateDialog ? newTask.event_ai_timeout ?? "" : editTask.event_ai_timeout ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(1, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_ai_timeout: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_ai_timeout: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "按钮回调超时秒数" : "Callback timeout"} htmlFor="task-event-callback-timeout">
-                                    <Input
-                                        id="task-event-callback-timeout"
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder="10"
-                                        value={showCreateDialog ? newTask.event_callback_timeout ?? "" : editTask.event_callback_timeout ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const raw = cleaned === "" ? undefined : Number(cleaned);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(0.1, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_callback_timeout: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_callback_timeout: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <FormField label={language === "zh" ? "按钮回调重试次数" : "Callback retries"} htmlFor="task-event-callback-retries">
-                                    <Input
-                                        id="task-event-callback-retries"
-                                        type="text"
-                                        inputMode="numeric"
-                                        placeholder="3"
-                                        value={showCreateDialog ? newTask.event_callback_retries ?? "" : editTask.event_callback_retries ?? ""}
-                                        onChange={(e) => {
-                                            const cleaned = e.target.value.replace(/[^0-9]/g, "");
-                                            const raw = cleaned === "" ? undefined : parseInt(cleaned, 10);
-                                            const val = raw === undefined || Number.isNaN(raw) ? undefined : Math.max(1, raw);
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_callback_retries: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_callback_retries: val });
-                                            }
-                                        }}
-                                    />
-                                </FormField>
-                                <label
-                                    className="flex min-h-10 items-center gap-2 rounded border border-border px-3 text-sm text-foreground md:col-span-2"
-                                    htmlFor="task-event-ai-fallback"
-                                >
-                                    <input
-                                        id="task-event-ai-fallback"
-                                        type="checkbox"
-                                        className="h-4 w-4 accent-primary"
-                                        checked={Boolean(showCreateDialog ? newTask.event_ai_fallback : editTask.event_ai_fallback)}
-                                        onChange={(e) => {
-                                            const val = e.target.checked ? true : undefined;
-                                            if (showCreateDialog) {
-                                                setNewTask({ ...newTask, event_ai_fallback: val });
-                                            } else {
-                                                setEditTask({ ...editTask, event_ai_fallback: val });
-                                            }
-                                        }}
-                                    />
-                                    {language === "zh" ? "未知后续交互启用 AI 兜底" : "AI fallback for unknown follow-up"}
-                                </label>
-                            </div>
-
                         <FormField label={t("retry_count")} htmlFor="task-retry-count">
                             <Input
                                 id="task-retry-count"
@@ -2529,6 +1303,23 @@ export default function AccountTasksContent() {
                         </div>
                     </div>
 
+                    {showEditDialog && editingChats.length > 1 && (
+                        <FormField label={isZh ? "编辑目标会话" : "Edit target chat"} htmlFor="editing-chat-index">
+                            <select id="editing-chat-index" className={selectClassName} value={editingChatIndex}
+                                onChange={event => {
+                                    try {
+                                        const drafts = replaceEditedChat(editingChats, editingChatIndex, editTask);
+                                        const index = Number(event.target.value);
+                                        setEditingChats(drafts);
+                                        setEditingChatIndex(index);
+                                        setEditTask(prev => ({ ...prev, ...chatToForm(drafts[index]) }));
+                                    } catch (error) { addToast((error as Error).message, "error"); }
+                                }}>
+                                {editingChats.map((chat, index) => <option key={index} value={index}>{index + 1}. {chat.name || chat.chat_id}</option>)}
+                            </select>
+                            <p className="mt-2 text-xs text-[var(--text-secondary)]">{isZh ? "保存会保留所有会话，可切换后分别编辑。" : "All chats are preserved. Switch to edit each one."}</p>
+                        </FormField>
+                    )}
                     <div className="glass-panel !bg-[var(--bg-tertiary)] space-y-4 border-[var(--border-secondary)] p-4">
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="space-y-2 min-w-0">
@@ -3001,6 +1792,8 @@ export default function AccountTasksContent() {
                             ))}
                         </div>
                     </div>
+                <TaskAdvancedSettings value={showCreateDialog ? newTask : editTask} isZh={isZh}
+                        onChange={patch => showCreateDialog ? setNewTask(prev => ({ ...prev, ...patch })) : setEditTask(prev => ({ ...prev, ...patch }))} />
                 </div>
             </ModalShell>
 

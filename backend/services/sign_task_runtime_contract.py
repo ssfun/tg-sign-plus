@@ -3,17 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Sequence
 
-EVENT_ENGINE_CAPTCHA_RESULT_TEXT_PREEMPTED = "event_engine_captcha_result_text_preempted"
-EVENT_ENGINE_MESSAGE_PROCESSING_CANCELLED = "event_engine_message_processing_cancelled"
-EVENT_ENGINE_BUTTON_CALLBACK_RELEASED_FOR_RETRY = "event_engine_button_callback_released_for_retry"
-EVENT_ENGINE_HARD_TIMEOUT_LATE_CANCELLED = "event_engine_hard_timeout_late_cancelled"
-EVENT_ENGINE_HARD_TIMEOUT_LATE_COMPLETED = "event_engine_hard_timeout_late_completed"
-EVENT_ENGINE_HARD_TIMEOUT_LATE_EXCEPTION = "event_engine_hard_timeout_late_exception"
-EVENT_ENGINE_HARD_TIMEOUT_LATE_EVENTS = (
+from tg_signer.event_contract import (
+    EVENT_ENGINE_CAPTCHA_RESULT_TEXT_PREEMPTED,
+    EVENT_ENGINE_MESSAGE_PROCESSING_CANCELLED,
+    EVENT_ENGINE_BUTTON_CALLBACK_RELEASED_FOR_RETRY,
     EVENT_ENGINE_HARD_TIMEOUT_LATE_CANCELLED,
     EVENT_ENGINE_HARD_TIMEOUT_LATE_COMPLETED,
     EVENT_ENGINE_HARD_TIMEOUT_LATE_EXCEPTION,
+    EVENT_ENGINE_HARD_TIMEOUT_LATE_EVENTS,
 )
+
 EVENT_TASK_RUNTIME_CONFIG = "task_runtime_config"
 EVENT_ENGINE_STARTED = "event_engine_started"
 EVENT_ENGINE_BUTTON_CLICKED = "event_engine_button_clicked"

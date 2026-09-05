@@ -555,7 +555,6 @@ export default function Dashboard() {
 
   const debugQr = useCallback((payload: Record<string, any>) => {
     if (process.env.NODE_ENV !== "production") {
-      // eslint-disable-next-line no-console
       console.debug("[qr-login]", payload);
     }
   }, []);
@@ -765,7 +764,7 @@ export default function Dashboard() {
     }
   }, [
     token,
-    qrLogin?.login_id,
+    qrLogin,
     addToast,
     resetQrState,
     loadData,
@@ -775,7 +774,7 @@ export default function Dashboard() {
     normalizeAccountName,
   ]);
 
-  const startQrPolling = useCallback((loginId: string, reason: string = "effect") => {
+  const startQrPolling = useCallback(function startPolling(loginId: string, reason: string = "effect") {
     if (!token || !loginId) return;
     if (loginMode !== "qr" || !showAddDialog) return;
     if (qrPollingActiveRef.current && qrActiveLoginIdRef.current === loginId) {
@@ -879,7 +878,7 @@ export default function Dashboard() {
             reason: "auto_refresh",
           });
           if (refreshed?.login_id) {
-            startQrPolling(refreshed.login_id, "auto_refresh");
+            startPolling(refreshed.login_id, "auto_refresh");
             return;
           }
           setQrPhaseSafe("expired", "auto_refresh_failed", { status });

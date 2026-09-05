@@ -17,3 +17,8 @@ frontend/out/
 frontend/tsconfig.tsbuildinfo
 
 *.log
+
+.venv/
+*.egg-info/
+.env
+data/
