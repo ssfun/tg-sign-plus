@@ -1273,7 +1273,7 @@ export default function AccountTasksContent() {
                             ) : (
                                 <>
                                     <label className={fieldLabelClass}>{t("time_range")}</label>
-                                    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                                    <div className="task-time-range grid min-w-0 grid-cols-2 gap-2">
                                         <FormField label={t("start_label")} htmlFor="task-range-start">
                                             <Input
                                                 id="task-range-start"

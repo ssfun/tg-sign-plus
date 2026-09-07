@@ -743,3 +743,21 @@ select option {
     font-size: 16px;
   }
 }
+
+/* Native time fields must fit their grid tracks, including WebKit's value box. */
+.task-time-range input[type="time"] {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  padding-inline: 6px;
+}
+.task-time-range input[type="time"]::-webkit-date-and-time-value {
+  min-width: 0;
+  text-align: left;
+}
+.task-time-range input[type="time"]::-webkit-datetime-edit {
+  min-width: 0;
+  padding: 0;
+}
