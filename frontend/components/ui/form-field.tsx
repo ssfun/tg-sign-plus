@@ -13,7 +13,7 @@ interface FormFieldProps {
 
 export function FormField({ label, htmlFor, hint, error, className, children }: FormFieldProps) {
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("min-w-0 space-y-2", className)}>
       <Label htmlFor={htmlFor} className="mb-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
         {label}
       </Label>

@@ -40,7 +40,7 @@ export function DashboardFrame({
   showThemeLanguageToggle = true,
 }: DashboardFrameProps) {
   return (
-    <div className={className ?? "w-full h-full flex flex-col bg-[var(--bg-primary)]"}>
+    <div className={className ?? "w-full min-h-dvh flex flex-col bg-[var(--bg-primary)]"}>
       <nav className="navbar">
         <div className="min-w-0 flex flex-1 items-center gap-3">
           {backHref ? (

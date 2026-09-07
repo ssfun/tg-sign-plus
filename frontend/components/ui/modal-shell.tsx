@@ -91,7 +91,7 @@ export function ModalShell({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3 backdrop-blur-md animate-fade-in sm:p-4 md:p-6 dark:bg-black/78"
+      className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3 backdrop-blur-md animate-fade-in sm:p-4 md:p-6 dark:bg-black/78"
       onClick={onClose}
     >
       <Card
@@ -102,21 +102,21 @@ export function ModalShell({
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={cn(
-          "flex max-h-[calc(100dvh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-[var(--border-primary)] bg-[var(--bg-secondary)] shadow-[var(--shadow-modal)] ring-1 ring-black/5 animate-scale-in",
+          "modal-panel flex min-w-0 transition-colors max-h-[calc(100dvh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-[var(--border-primary)] bg-[var(--bg-secondary)] shadow-[var(--shadow-modal)] ring-1 ring-black/5 animate-scale-in",
           className
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <CardHeader className="flex shrink-0 flex-row items-start justify-between gap-4 border-b border-[var(--border-secondary)] bg-[var(--bg-tertiary)]">
+        <CardHeader className="flex shrink-0 flex-row items-start justify-between gap-3 border-b border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-4 py-3 sm:px-5 sm:py-4">
           <div className="min-w-0 flex-1">
-            <CardTitle id={titleId} className="text-base md:text-lg">{title}</CardTitle>
+            <CardTitle id={titleId} className="break-words [overflow-wrap:anywhere] text-base md:text-lg">{title}</CardTitle>
             {description ? <p id={descriptionId} className="mt-1.5 break-words text-sm text-[var(--text-secondary)]">{description}</p> : null}
           </div>
           <IconButton aria-label="Close modal" onClick={onClose} className="h-9 w-9 shrink-0 border-[var(--border-secondary)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
             <X weight="bold" />
           </IconButton>
         </CardHeader>
-        <CardContent className={cn("max-h-[min(78vh,720px)] overflow-y-auto bg-[var(--bg-secondary)] p-4 md:p-5", contentClassName, "min-h-0")}>{children}</CardContent>
+        <CardContent className={cn("min-w-0 max-h-[min(78dvh,720px)] overscroll-contain overflow-y-auto bg-[var(--bg-secondary)] p-4 md:p-5", contentClassName, "min-h-0")}>{children}</CardContent>
         {footer ? <div className="shrink-0 border-t border-[var(--border-secondary)] bg-[var(--bg-secondary)] px-4 py-4 shadow-[0_-1px_0_rgba(255,255,255,0.04)] md:px-5">{footer}</div> : null}
       </Card>
     </div>

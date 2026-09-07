@@ -65,9 +65,9 @@ export const TaskItem = memo(({ task, loading, isRunning, schedulerItem, schedul
                     <ChatCircleText weight="bold" size={20} />
                 </div>
                 <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <h3 className="truncate text-sm font-bold" title={task.name}>{task.name}</h3>
-                        <span className="rounded border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--text-tertiary)]">
+                        <span className="shrink-0 whitespace-nowrap rounded border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--text-tertiary)]">
                             {task.chats.length > 1 ? `${task.chats.length} ${language === "zh" ? "个会话" : "chats"}` : task.chats[0]?.chat_id || "-"}
                         </span>
                     </div>
@@ -179,7 +179,7 @@ export const TaskItem = memo(({ task, loading, isRunning, schedulerItem, schedul
                 )}
             </div>
 
-            <div className="mt-4 flex flex-nowrap items-center gap-1.5 border-t border-[var(--border-secondary)] pt-4 sm:gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-[var(--border-secondary)] pt-4 sm:gap-2">
                 <Button
                     size="sm"
                     onClick={() => {
@@ -193,7 +193,7 @@ export const TaskItem = memo(({ task, loading, isRunning, schedulerItem, schedul
                     {t("run")}
                 </Button>
 
-                <div className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5 sm:gap-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
                     <Button
                         variant="secondary"
                         size="sm"

@@ -387,10 +387,10 @@ export const HistoryTimeline = ({ items, isZh, language, failureOnly, expandDeta
                 const allMeta = formatInlineMeta(item.meta, true, item.text);
                 return (
                     <details key={`${item.ts}-${index}`} open={expandDetails} className={cn("group px-3 py-2.5", item.level === "error" && "border-l-4 border-red-500 bg-red-500/8", item.level === "warning" && "border-l-4 border-amber-500 bg-amber-500/8")}>
-                        <summary className="grid cursor-pointer list-none grid-cols-[70px,76px,minmax(0,1fr)] gap-2 text-[12px] leading-5 md:grid-cols-[82px,90px,minmax(0,1fr)]">
+                        <summary className="grid cursor-pointer list-none grid-cols-[70px_minmax(0,1fr)] sm:grid-cols-[70px_76px_minmax(0,1fr)] gap-2 text-[12px] leading-5 md:grid-cols-[82px,90px,minmax(0,1fr)]">
                             <span className="font-mono tabular-nums text-[var(--text-tertiary)]">{formatFlowTime(item.ts, language)}</span>
                             <span className={cn("font-semibold uppercase tracking-[0.08em]", item.level === "error" ? "text-red-300" : item.level === "warning" ? "text-amber-300" : item.level === "success" ? "text-emerald-300" : "text-[var(--text-tertiary)]")}>{flowStageLabel(item.stage, isZh)}</span>
-                            <span className="min-w-0 break-words text-[var(--text-primary)]">
+                            <span className="col-span-2 min-w-0 break-words [overflow-wrap:anywhere] text-[var(--text-primary)] sm:col-span-1">
                                 {cleanFlowText(item.text)}
                                 {compactMeta ? <span className="ml-2 text-[10px] text-[var(--text-tertiary)]">{compactMeta}</span> : null}
                             </span>

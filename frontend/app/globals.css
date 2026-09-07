@@ -144,6 +144,7 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   min-height: 100vh;
+  min-height: 100dvh;
   font-feature-settings: "ss01" 1, "cv01" 1;
   transition: background-color var(--transition-base), color var(--transition-base);
   -webkit-font-smoothing: antialiased;
@@ -160,6 +161,8 @@ h1, h2, h3, h4, h5, h6 {
 input:not([type="checkbox"]):not([type="radio"]),
 textarea,
 select {
+  min-width: 0;
+  max-width: 100%;
   width: 100%;
   padding: 10px 14px;
   background-color: var(--bg-secondary);
@@ -276,6 +279,7 @@ select option {
 
 /* ================= 卡片/面板 ================= */
 .glass-panel {
+  min-width: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-lg);
@@ -367,15 +371,14 @@ select option {
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
-  overflow-y: auto;
-  overflow-x: hidden;
+  min-width: 0;
   animation: slideUp 0.4s 0.05s backwards;
 }
 
 /* ================= 卡片网格 ================= */
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 16px;
 }
 
@@ -668,8 +671,9 @@ select option {
 /* ================= 移动端适配 ================= */
 @media (max-width: 768px) {
   .navbar {
-    padding: 0 16px;
-    height: 52px;
+    padding: 8px 12px;
+    min-height: 60px;
+    gap: 8px;
   }
 
   .main-content {
@@ -722,5 +726,20 @@ select option {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* Keep dialogs inside dynamic viewports and device safe areas. */
+.modal-backdrop {
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+}
+.modal-panel {
+  max-height: calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
+}
+@media (max-width: 639px) {
+  /* Prevent iOS from zooming the page when an editor field receives focus. */
+  input:not([type="checkbox"]):not([type="radio"]), :root textarea, :root select {
+    font-size: 16px;
   }
 }

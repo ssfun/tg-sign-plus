@@ -986,10 +986,10 @@ export default function AccountTasksContent() {
     }
 
     return (
-        <div className="flex min-h-screen flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+        <div className="flex min-h-dvh flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
             <nav className="navbar">
                 <div className="min-w-0 flex flex-1 items-center gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-sm">
+                    <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-sm sm:inline-flex">
                         <Lightning weight="fill" size={20} />
                     </span>
                     <span className="nav-title truncate text-lg font-bold tracking-tight">TG Sign Plus</span>
@@ -1172,7 +1172,7 @@ export default function AccountTasksContent() {
                     setShowEditDialog(false);
                 }}
                 className="max-w-xl"
-                contentClassName="max-h-[78vh] overflow-y-auto p-5 custom-scrollbar"
+                contentClassName="overflow-y-auto p-3 sm:p-5 custom-scrollbar"
                 footer={
                     <div className="flex gap-3">
                         <Button
@@ -1492,7 +1492,7 @@ export default function AccountTasksContent() {
                     </div>
 
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
                             <h3 className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-[var(--text-tertiary)]">
                                 <DotsThreeVertical weight="bold" />
                                 {t("action_sequence")}
@@ -1509,12 +1509,13 @@ export default function AccountTasksContent() {
 
                         <div className="flex flex-col gap-3">
                             {(showCreateDialog ? newTask.actions : editTask.actions).map((action, index) => (
-                                <div key={index} className="flex items-center gap-3 animate-scale-in">
+                                <div key={index} className="task-action grid min-w-0 grid-cols-[1.5rem_minmax(0,1fr)_2.5rem] items-start gap-3 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-primary)] p-3 animate-scale-in">
                                     <div className="flex h-10 w-6 shrink-0 items-center justify-center border-r border-[var(--border-secondary)] font-mono text-[10px] font-bold text-[var(--text-tertiary)]">
                                         {index + 1}
                                     </div>
                                     <select
-                                        className={cn(selectClassName, "w-[170px] shrink-0")}
+                                        className={cn(selectClassName, "min-w-0")}
+                                        aria-label={isZh ? `动作 ${index + 1} 类型` : `Action ${index + 1} type`}
                                         value={toActionTypeOption(action)}
                                         onChange={(e) => {
                                             const selectedType = e.target.value as ActionTypeOption;
@@ -1577,7 +1578,7 @@ export default function AccountTasksContent() {
                                         <option value="assert_success">{assertSuccessLabel}</option>
                                     </select>
 
-                                    <div className="min-w-0 flex-1">
+                                    <div className="task-action-fields col-span-3 min-w-0 sm:col-span-2 sm:col-start-2">
                                         {action.action === 10 ? (
                                             <label className="flex items-center gap-2">
                                                 <Input
@@ -1609,7 +1610,7 @@ export default function AccountTasksContent() {
                                         ) : null}
 
                                         {action.action === 2 ? (
-                                            <div className="flex items-center gap-2 overflow-x-auto">
+                                            <div className="flex flex-wrap items-center gap-2">
                                                 {DICE_OPTIONS.map((d) => (
                                                     <Button
                                                         key={d}
@@ -1635,10 +1636,10 @@ export default function AccountTasksContent() {
                                         ) : null}
 
                                         {action.action === 4 || action.action === 6 ? (
-                                            <div className="flex h-10 items-center gap-2 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-3">
+                                            <div className="flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-3">
                                                 <Robot weight="fill" size={16} className="text-[#8183ff]" />
                                                 <select
-                                                    className={cn(selectClassName, "h-10 w-[220px] max-w-full py-0 text-xs")}
+                                                    className={cn(selectClassName, "h-10 min-w-0 flex-1 py-0 text-xs")}
                                                     value={action.action === 4 ? "click" : "send"}
                                                     onChange={(e) => {
                                                         const nextActionId = e.target.value === "click" ? 4 : 6;
@@ -1756,10 +1757,10 @@ export default function AccountTasksContent() {
                                         ) : null}
 
                                         {action.action === 5 || action.action === 7 ? (
-                                            <div className="flex h-10 items-center gap-2 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-3">
+                                            <div className="flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-3">
                                                 <MathOperations weight="fill" size={16} className="text-amber-400" />
                                                 <select
-                                                    className={cn(selectClassName, "h-10 w-[220px] max-w-full py-0 text-xs")}
+                                                    className={cn(selectClassName, "h-10 min-w-0 flex-1 py-0 text-xs")}
                                                     value={action.action === 7 ? "click" : "send"}
                                                     onChange={(e) => {
                                                         const nextActionId = e.target.value === "click" ? 7 : 5;
@@ -1776,9 +1777,9 @@ export default function AccountTasksContent() {
                                         ) : null}
 
                                         {action.action === 8 ? (
-                                            <div className="flex h-10 items-center gap-2 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-3">
+                                            <div className="flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-3">
                                                 <Robot weight="fill" size={16} className="text-fuchsia-300" />
-                                                <div className="text-xs font-medium text-fuchsia-200">{aiPoetryClickModeLabel}</div>
+                                                <div className="min-w-0 py-2 text-xs font-medium text-[var(--text-secondary)]">{aiPoetryClickModeLabel}</div>
                                             </div>
                                         ) : null}
 
@@ -1806,7 +1807,7 @@ export default function AccountTasksContent() {
                                         type="button"
                                         onClick={() => (showCreateDialog ? handleRemoveAction(index) : handleEditRemoveAction(index))}
                                         activeTone="danger"
-                                        className="shrink-0 !h-10 !w-10 bg-[var(--danger-muted)]"
+                                        className="col-start-3 row-start-1 shrink-0 !h-10 !w-10 bg-[var(--danger-muted)]"
                                         aria-label={t("delete")}
                                         title={t("delete")}
                                     >
@@ -2000,7 +2001,7 @@ export default function AccountTasksContent() {
                                 </div>
                             </div>
 
-                            <div className="min-h-0 flex-1 overflow-y-auto p-3 custom-scrollbar md:p-5">
+                            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto [overflow-wrap:anywhere] p-3 custom-scrollbar md:p-5">
                                 {historyLogView === "read" ? (
                                 <div className="space-y-4">
                                     {selectedHistoryLog.run_summary ? (
@@ -2040,7 +2041,7 @@ export default function AccountTasksContent() {
                                             expandDetails={historyExpandDetails}
                                         />
                                     ) : selectedHistoryLog.flow_logs && selectedHistoryLog.flow_logs.length > 0 ? (
-                                        <pre className="whitespace-pre-wrap rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-primary)] p-4 font-mono text-xs leading-6 text-[var(--text-primary)]">
+                                        <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-primary)] p-4 font-mono text-xs leading-6 text-[var(--text-primary)]">
                                             {selectedHistoryLog.flow_logs.join("\n")}
                                         </pre>
                                     ) : (
@@ -2055,11 +2056,11 @@ export default function AccountTasksContent() {
                                     )}
                                 </div>
                             ) : historyLogView === "ai" ? (
-                                <pre className="whitespace-pre-wrap rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-primary)] p-4 font-mono text-xs leading-6 text-[var(--text-primary)]">
+                                <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-primary)] p-4 font-mono text-xs leading-6 text-[var(--text-primary)]">
                                     {historyTaskName ? formatHistoryForAi({ log: selectedHistoryLog, accountName, taskName: historyTaskName, language, isZh }) : ""}
                                 </pre>
                             ) : (
-                                <pre className="whitespace-pre-wrap rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-primary)] p-4 font-mono text-xs leading-6 text-[var(--text-primary)]">
+                                <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl border border-[var(--border-secondary)] bg-[var(--bg-primary)] p-4 font-mono text-xs leading-6 text-[var(--text-primary)]">
                                     {historyTaskName ? formatHistoryRawJson(selectedHistoryLog, accountName, historyTaskName) : ""}
                                 </pre>
                             )}

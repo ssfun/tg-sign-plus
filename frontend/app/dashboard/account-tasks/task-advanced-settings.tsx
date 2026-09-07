@@ -139,7 +139,7 @@ export function TaskAdvancedSettings({ value, onChange, isZh }: {
     return <details className="rounded-xl border border-[var(--border-secondary)] p-4">
         <summary className="cursor-pointer text-sm font-semibold">{isZh ? "高级设置（可选）" : "Advanced settings (optional)"}</summary>
         <p className="my-3 text-xs text-[var(--text-secondary)]">{isZh ? "通常无需调整。留空使用默认值；仅在排查超时或机器人交互问题时修改。" : "Defaults work for most tasks. Leave blank to use defaults; adjust only when troubleshooting."}</p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {fields.map(field => <FormField key={field.key} label={isZh ? field.zh : field.en} htmlFor={field.id}>
                 <Input id={field.id} type="number" min={field.min} step={field.integer ? 1 : "any"}
                     placeholder={field.placeholder} value={value[field.key] ?? ""}

@@ -1074,10 +1074,10 @@ export default function Dashboard() {
     <DashboardFrame
       title={
         <span className="inline-flex items-center gap-3">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-sm">
+          <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-sm sm:inline-flex">
             <Lightning weight="fill" size={20} />
           </span>
-          <span className="nav-title font-bold tracking-tight text-lg">TG Sign Plus</span>
+          <span className="nav-title whitespace-nowrap font-bold tracking-tight text-base sm:text-lg">TG Sign Plus</span>
         </span>
       }
       toasts={toasts}
@@ -1174,7 +1174,7 @@ export default function Dashboard() {
               </h3>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {accounts.map((acc) => {
                 const initial = acc.name.charAt(0).toUpperCase();
                 const statusInfo = accountStatusMap[acc.name];
@@ -1194,7 +1194,7 @@ export default function Dashboard() {
                 return (
                   <div key={acc.name} className="glass-panel p-5 sm:p-6">
                     <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0 flex items-center gap-3">
+                      <div className="min-w-0 flex flex-1 items-center gap-3">
                         <div className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[var(--accent)] text-sm font-bold text-white shadow-sm">
                           {initial}
                         </div>
@@ -1231,7 +1231,7 @@ export default function Dashboard() {
                       </div>
                     </div>
 
-                    <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--border-secondary)] pt-4">
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border-secondary)] pt-4">
                       <Button variant="secondary" size="sm" onClick={() => handleAccountCardClick(acc)}>
                         {language === "zh" ? "进入工作台" : "Open workspace"}
                       </Button>

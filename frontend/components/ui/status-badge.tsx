@@ -17,7 +17,7 @@ export function StatusBadge({ tone = "neutral", className, ...props }: StatusBad
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[0.12em] uppercase",
+        "inline-flex max-w-full shrink-0 items-center whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[0.12em] uppercase",
         toneMap[tone],
         className,
       )}

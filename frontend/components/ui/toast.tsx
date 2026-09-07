@@ -64,13 +64,13 @@ export function Toast({ message, type = "info", duration = 4000, onClose }: Toas
                 flex items-center gap-3 rounded-2xl px-4 py-3
                 border ${getAccentClasses()}
                 shadow-[var(--shadow-lg)]
-                min-w-[280px] max-w-[400px]
+                min-w-0 w-full
             `}
         >
             <div className="shrink-0">
                 {getIcon()}
             </div>
-            <p className="text-sm font-medium text-[var(--text-primary)] flex-1">{message}</p>
+            <p className="min-w-0 break-words [overflow-wrap:anywhere] text-sm font-medium text-[var(--text-primary)] flex-1">{message}</p>
             <button
                 onClick={() => {
                     setIsExiting(true);
@@ -93,7 +93,7 @@ interface ToastContainerProps {
 
 export function ToastContainer({ toasts, removeToast }: ToastContainerProps) {
     return (
-        <div className="fixed bottom-6 right-6 z-[1000] flex flex-col gap-2.5">
+        <div className="fixed bottom-[max(12px,env(safe-area-inset-bottom))] left-3 right-3 z-[1000] flex flex-col gap-2.5 sm:bottom-6 sm:left-auto sm:right-6 sm:w-[400px] sm:max-w-[calc(100vw-48px)]">
             {toasts.map((toast) => (
                 <Toast
                     key={toast.id}

@@ -49,7 +49,7 @@ export default function LoginForm() {
   };
 
   return (
-    <div id="login-view" className="flex min-h-screen flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <div id="login-view" className="flex min-h-dvh flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <nav className="navbar px-4 py-3 sm:px-5 sm:py-0">
         <div className="min-w-0 flex flex-1 items-center gap-3">
           <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-sm">

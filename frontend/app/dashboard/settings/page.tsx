@@ -426,10 +426,10 @@ export default function SettingsPage() {
     }
 
     return (
-        <div className="flex min-h-screen flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+        <div className="flex min-h-dvh flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
             <nav className="navbar">
                 <div className="min-w-0 flex flex-1 items-center gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-sm">
+                    <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-sm sm:inline-flex">
                         <Lightning weight="fill" size={20} />
                     </span>
                     <span className="nav-title truncate text-lg font-bold tracking-tight">TG Sign Plus</span>
