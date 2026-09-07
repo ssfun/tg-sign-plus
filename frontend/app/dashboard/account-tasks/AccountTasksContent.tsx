@@ -1253,7 +1253,7 @@ export default function AccountTasksContent() {
                             />
                         </FormField>
 
-                        <div className="space-y-2">
+                        <div className="min-w-0 space-y-2 md:col-span-2">
                             {(showCreateDialog ? newTask.execution_mode : editTask.execution_mode) === "fixed" ? (
                                 <>
                                     <label className={fieldLabelClass}>{t("sign_time_cron")}</label>
@@ -1273,33 +1273,39 @@ export default function AccountTasksContent() {
                             ) : (
                                 <>
                                     <label className={fieldLabelClass}>{t("time_range")}</label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <Input
-                                            type="time"
-                                            aria-label={t("start_label")}
-                                            title={t("start_label")}
-                                            value={showCreateDialog ? newTask.range_start : editTask.range_start}
-                                            onChange={(e) => {
-                                                if (showCreateDialog) {
-                                                    setNewTask({ ...newTask, range_start: e.target.value });
-                                                } else {
-                                                    setEditTask({ ...editTask, range_start: e.target.value });
-                                                }
-                                            }}
-                                        />
-                                        <Input
-                                            type="time"
-                                            aria-label={t("end_label")}
-                                            title={t("end_label")}
-                                            value={showCreateDialog ? newTask.range_end : editTask.range_end}
-                                            onChange={(e) => {
-                                                if (showCreateDialog) {
-                                                    setNewTask({ ...newTask, range_end: e.target.value });
-                                                } else {
-                                                    setEditTask({ ...editTask, range_end: e.target.value });
-                                                }
-                                            }}
-                                        />
+                                    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                                        <FormField label={t("start_label")} htmlFor="task-range-start">
+                                            <Input
+                                                id="task-range-start"
+                                                type="time"
+                                                aria-label={t("start_label")}
+                                                title={t("start_label")}
+                                                value={showCreateDialog ? newTask.range_start : editTask.range_start}
+                                                onChange={(e) => {
+                                                    if (showCreateDialog) {
+                                                        setNewTask({ ...newTask, range_start: e.target.value });
+                                                    } else {
+                                                        setEditTask({ ...editTask, range_start: e.target.value });
+                                                    }
+                                                }}
+                                            />
+                                        </FormField>
+                                        <FormField label={t("end_label")} htmlFor="task-range-end">
+                                            <Input
+                                                id="task-range-end"
+                                                type="time"
+                                                aria-label={t("end_label")}
+                                                title={t("end_label")}
+                                                value={showCreateDialog ? newTask.range_end : editTask.range_end}
+                                                onChange={(e) => {
+                                                    if (showCreateDialog) {
+                                                        setNewTask({ ...newTask, range_end: e.target.value });
+                                                    } else {
+                                                        setEditTask({ ...editTask, range_end: e.target.value });
+                                                    }
+                                                }}
+                                            />
+                                        </FormField>
                                     </div>
                                     <div className="mt-1 text-[10px] italic text-[var(--text-tertiary)]">{t("random_time_hint")}</div>
                                 </>
