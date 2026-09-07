@@ -744,9 +744,13 @@ select option {
   }
 }
 
-/* Native time fields must fit their grid tracks, including WebKit's value box. */
+/* iOS native time appearance can add intrinsic control size beyond the grid track. */
 .task-time-range input[type="time"] {
+  -webkit-appearance: none;
+  appearance: none;
   display: block;
+  height: 2.5rem;
+  min-height: 0;
   box-sizing: border-box;
   min-width: 0;
   width: 100%;
