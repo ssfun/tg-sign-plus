@@ -205,10 +205,12 @@ class SupportAction(int, Enum):
     CLICK_BUTTON_BY_CALCULATION_PROBLEM = 7  # AI calculation then click button
     CLICK_BUTTON_BY_POETRY_FILL = 8  # AI poetry fill then click button
     ASSERT_SUCCESS_BY_TEXT = 9  # Match the last message text to assert success
+    WAIT = 10  # 等待指定秒数
 
     @property
     def desc(self):
         return {
+            SupportAction.WAIT: "等待",
             SupportAction.SEND_TEXT: "发送普通文本",
             SupportAction.SEND_DICE: "发送Dice类型的emoji",
             SupportAction.CLICK_KEYBOARD_BY_TEXT: "根据文本点击键盘",
@@ -362,6 +364,17 @@ def _normalize_optional_text(value):
     return text or None
 
 
+class WaitAction(SignAction):
+    action: Literal[SupportAction.WAIT] = SupportAction.WAIT
+    seconds: int = Field(..., ge=1, le=300)
+
+    @validator("seconds", pre=True)
+    def validate_seconds(cls, value):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("等待秒数必须为 1–300 的整数")
+        return value
+
+
 class SendTextAction(SignAction):
     action: Literal[SupportAction.SEND_TEXT] = SupportAction.SEND_TEXT
     text: str
@@ -481,6 +494,7 @@ class AssertSuccessByTextAction(SignAction):
 
 
 ActionT: TypeAlias = Union[
+    WaitAction,
     SendTextAction,
     SendDiceAction,
     ClickKeyboardByTextAction,
@@ -640,6 +654,8 @@ class SignChatV3(BaseJSONConfig):
                     action.text[:15] + "..." if len(action.text) > 15 else action.text
                 )
                 details = f"Text: {text_preview}"
+            elif isinstance(action, WaitAction):
+                details = f"Wait: {action.seconds}s"
             elif isinstance(action, SendDiceAction):
                 details = f"Dice: {action.dice}"
             elif isinstance(action, ClickKeyboardByTextAction):

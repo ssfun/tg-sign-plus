@@ -33,12 +33,14 @@ from tg_signer.config import (
     SendDiceAction,
     SendTextAction,
     SignChatV3,
+    WaitAction,
 )
 
 from .callback_actions import CallbackAnswerResult
 from .message_helpers import extract_keyboard_options, get_message_text_content, message_version, readable_message
 from .text_cleaners import clean_text_for_match, clean_text_for_send
 from tg_signer_contracts.errors import BusinessRetryableError
+from tg_signer_contracts.wait_budget import action_wait_budget
 
 
 class EventRunStatus(str, Enum):
@@ -68,10 +70,11 @@ def _retryable_error_type(exc: BaseException) -> str:
 
 @dataclass
 class EventRunSpec:
-    send_actions: list[SendTextAction | SendDiceAction] = field(default_factory=list)
+    send_actions: list[SendTextAction | SendDiceAction | WaitAction] = field(default_factory=list)
     response_actions: list[
         SendTextAction
         | SendDiceAction
+        | WaitAction
         | ClickKeyboardByTextAction
         | ChooseOptionByImageAction
         | ReplyByCalculationProblemAction
@@ -174,7 +177,7 @@ def build_event_spec(chat: SignChatV3) -> EventRunSpec:
     spec = EventRunSpec()
     collecting_initial_sends = True
     for action in chat.actions:
-        if isinstance(action, (SendTextAction, SendDiceAction)):
+        if isinstance(action, (SendTextAction, SendDiceAction, WaitAction)):
             if collecting_initial_sends:
                 spec.send_actions.append(action)
             else:
@@ -274,6 +277,7 @@ class SignEventRunner:
             "unconfirmed": 0,
         }
         self.message_lock = asyncio.Lock()
+        self._completed_wait_seconds = 0
         self.current_response_index = 0
         self.retry_count = 0
         self.retry_suppressed_count = 0
@@ -1787,12 +1791,37 @@ class SignEventRunner:
             )
             raise
 
+    async def _wait_action(self, action: WaitAction) -> bool:
+        self.log(
+            f"等待 {action.seconds} 秒",
+            stage="action",
+            event="event_engine_wait_started",
+            meta={"chat_id": self.chat.chat_id, "seconds": action.seconds},
+        )
+        try:
+            await asyncio.wait_for(self.finished.wait(), timeout=action.seconds)
+            return False
+        except asyncio.TimeoutError:
+            self._completed_wait_seconds += action.seconds
+            self.log(
+                f"等待完成（{action.seconds} 秒）",
+                stage="action",
+                event="event_engine_wait_completed",
+                meta={"chat_id": self.chat.chat_id, "seconds": action.seconds},
+            )
+            return not self.finished.is_set()
+
     async def _send_initial_actions(self, *, retry: bool = False) -> None:
         for index, action in enumerate(self.spec.send_actions, start=1):
             if retry and index == 1:
                 await asyncio.sleep(self.retry_wait)
+            if self.finished.is_set():
+                return
             try:
-                if isinstance(action, SendTextAction):
+                if isinstance(action, WaitAction):
+                    if not await self._wait_action(action):
+                        return
+                elif isinstance(action, SendTextAction):
                     self.log(
                         f"事件引擎发送入口文本: {action.text}",
                         stage="action",
@@ -1881,9 +1910,10 @@ class SignEventRunner:
             },
         )
         try:
-            await self._send_initial_actions(retry=True)
-            await self._drain_immediate_response_actions(ignore_retry_pending=True)
-            self._finish_if_no_result_required()
+            async with self.message_lock:
+                await self._send_initial_actions(retry=True)
+                await self._drain_immediate_response_actions(ignore_retry_pending=True)
+                self._finish_if_no_result_required()
             self.log(
                 "事件引擎重试入口动作完成",
                 level="success" if self.finished.is_set() else "INFO",
@@ -1959,10 +1989,16 @@ class SignEventRunner:
             if not ignore_retry_pending and self._retry_task and not self._retry_task.done():
                 return
             action = self._current_response_action()
-            if not isinstance(action, (SendTextAction, SendDiceAction)):
+            if not isinstance(action, (SendTextAction, SendDiceAction, WaitAction)):
+                return
+            if self.finished.is_set():
                 return
             try:
-                if isinstance(action, SendTextAction):
+                if isinstance(action, WaitAction):
+                    if not await self._wait_action(action):
+                        return
+                    message = None
+                elif isinstance(action, SendTextAction):
                     self.log(
                         f"事件引擎发送后续文本: {action.text}",
                         stage="action",
@@ -2034,6 +2070,22 @@ class SignEventRunner:
         if not self._is_inbound_chat_message(message):
             self._record_message_skip("non_inbound", message)
             return
+        # Terminal results must not queue behind sends/waits. Classification is
+        # synchronous; only action execution/advancement needs the message lock.
+        if self.spec.requires_result and self.message_lock.locked():
+            version = message_version(message)
+            if (
+                version not in self.stale_attempt_versions
+                and version not in self.processed_versions
+                and version not in self.processing_versions
+                and self._classify_text(
+                    get_message_text_content(message),
+                    source="realtime",
+                    message_id=getattr(message, "id", None),
+                )
+            ):
+                self._mark_message_processed_for_attempt(version, self.attempt_epoch)
+                return
         async with self.message_lock:
             await self._handle_message_locked(message)
 
@@ -2146,19 +2198,28 @@ class SignEventRunner:
             if self.finished.is_set():
                 return self._complete_run("history")
             if not history_handled:
-                await self._send_initial_actions()
-                await self._drain_immediate_response_actions()
-                self._finish_if_no_result_required()
+                async with self.message_lock:
+                    await self._send_initial_actions()
+                    await self._drain_immediate_response_actions()
+                    self._finish_if_no_result_required()
                 if self.finished.is_set():
                     return self._complete_run("initial_actions")
             try:
-                result = await asyncio.wait_for(self._wait_finished(), timeout=self.timeout)
+                # Reserve explicit wait time for the first attempt and inline retries.
+                # RPC/action timeouts stay unchanged; waiting is not a failed RPC.
+                wait_budget = action_wait_budget(
+                    (action.dict() for action in self.chat.actions), self.max_inline_retries,
+                )
+                # Startup/entry waits happened before this timer. Subtract them
+                # so the complete run fits the worker's shared wait allowance.
+                effective_timeout = self.timeout + max(0, wait_budget - self._completed_wait_seconds)
+                result = await asyncio.wait_for(self._wait_finished(), timeout=effective_timeout)
                 self._log_final_state(result, source="wait_finished")
                 return result
             except asyncio.TimeoutError:
                 self._log_timeout_state()
                 error = BusinessRetryableError(
-                    f"Event engine timed out after {self.timeout}s. chat_id={self.chat.chat_id}"
+                    f"Event engine timed out after {effective_timeout}s. chat_id={self.chat.chat_id}"
                 )
                 self._log_final_state(
                     EventRunResult(EventRunStatus.FAILED, str(error)),

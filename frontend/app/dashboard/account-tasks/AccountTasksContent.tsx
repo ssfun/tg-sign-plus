@@ -24,7 +24,7 @@ import { HistoryLogView, formatFlowDateTime, runSummaryStatusLabel, runSummaryTo
 
 import { TaskItem } from "./task-item";
 
-import { ActionTypeOption, TaskFormAction, isSuccessAssertionAction, TaskFormState, defaultTaskAction, toSuccessKeywords, toTaskFormAction, DICE_OPTIONS } from "./task-form";
+import { isValidWaitSeconds, ActionTypeOption, TaskFormAction, isSuccessAssertionAction, TaskFormState, defaultTaskAction, toSuccessKeywords, toTaskFormAction, DICE_OPTIONS } from "./task-form";
 
 import { TaskAdvancedSettings } from "./task-advanced-settings";
 import { chatToForm, formToChat, replaceEditedChat, findInvalidChatIndex } from "./task-form";
@@ -246,11 +246,13 @@ export default function AccountTasksContent() {
         if (actionId === 5 || actionId === 7) return "ai_logic";
         if (actionId === 8) return "ai_poetry";
         if (actionId === 9) return "assert_success";
+        if (actionId === 10) return "wait";
         return "1";
     }, []);
 
     const isActionValid = useCallback((action: TaskFormAction) => {
         const actionId = Number(action?.action);
+        if (action.action === 10) return isValidWaitSeconds(action.seconds);
         if (actionId === 1 || actionId === 3) {
             return Boolean(("text" in action ? action.text : "").trim());
         }
@@ -734,7 +736,8 @@ export default function AccountTasksContent() {
         }
 
         if (newTask.actions.length === 0 || newTask.actions.some((action) => !isActionValid(action))) {
-            addToast(t("add_action_error"), "error");
+            const invalidWait = newTask.actions.some(action => action.action === 10 && !isValidWaitSeconds(action.seconds));
+            addToast(invalidWait ? (isZh ? "等待秒数必须为 1–300 的整数" : "Wait seconds must be an integer from 1 to 300") : t("add_action_error"), "error");
             return;
         }
 
@@ -858,7 +861,8 @@ export default function AccountTasksContent() {
             return;
         }
         if (editTask.actions.length === 0 || editTask.actions.some((action) => !isActionValid(action))) {
-            addToast(t("add_action_error"), "error");
+            const invalidWait = editTask.actions.some(action => action.action === 10 && !isValidWaitSeconds(action.seconds));
+            addToast(invalidWait ? (isZh ? "等待秒数必须为 1–300 的整数" : "Wait seconds must be an integer from 1 to 300") : t("add_action_error"), "error");
             return;
         }
 
@@ -1522,6 +1526,9 @@ export default function AccountTasksContent() {
                                                 const currentRawInput = isSuccessAssertionAction(currentAction)
                                                     ? currentAction.raw_input
                                                     : currentKeywords.join(" # ");
+                                                if (selectedType === "wait") {
+                                                    return { action: 10, seconds: currentAction.action === 10 ? currentAction.seconds : 5 };
+                                                }
                                                 if (selectedType === "1") {
                                                     return { action: 1, text: currentText };
                                                 }
@@ -1560,6 +1567,7 @@ export default function AccountTasksContent() {
                                             });
                                         }}
                                     >
+                                        <option value="wait">{language === "zh" ? "等待" : "Wait"}</option>
                                         <option value="1">{sendTextLabel}</option>
                                         <option value="3">{clickTextButtonLabel}</option>
                                         <option value="2">{sendDiceLabel}</option>
@@ -1570,6 +1578,22 @@ export default function AccountTasksContent() {
                                     </select>
 
                                     <div className="min-w-0 flex-1">
+                                        {action.action === 10 ? (
+                                            <label className="flex items-center gap-2">
+                                                <Input
+                                                    type="number"
+                                                    min={1}
+                                                    max={300}
+                                                    step={1}
+                                                    aria-label={language === "zh" ? "等待秒数" : "Wait seconds"}
+                                                    aria-invalid={!isValidWaitSeconds(action.seconds)}
+                                                    className="h-10"
+                                                    value={Number.isNaN(action.seconds) ? "" : action.seconds}
+                                                    onChange={(e) => updateCurrentDialogAction(index, () => ({ action: 10, seconds: e.target.valueAsNumber }))}
+                                                />
+                                                <span className="shrink-0 text-xs text-[var(--text-secondary)]">{language === "zh" ? "秒（1–300）" : "seconds (1–300)"}</span>
+                                            </label>
+                                        ) : null}
                                         {action.action === 1 || action.action === 3 ? (
                                             <Input
                                                 placeholder={action.action === 1 ? sendTextPlaceholder : clickButtonPlaceholder}

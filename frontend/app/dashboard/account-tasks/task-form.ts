@@ -1,6 +1,6 @@
 import type { SignTaskAction, SignTaskChat } from "../../../lib/api";
 
-export type ActionTypeOption = "1" | "2" | "3" | "ai_vision" | "ai_logic" | "ai_poetry" | "assert_success";
+export type ActionTypeOption = "1" | "2" | "3" | "ai_vision" | "ai_logic" | "ai_poetry" | "assert_success" | "wait";
 
 export type SuccessAssertionFormAction = {
     action: 9;
@@ -42,6 +42,8 @@ export type TaskFormState = {
     range_start: string;
     range_end: string;
 };
+
+export const isValidWaitSeconds = (seconds: number): boolean => Number.isInteger(seconds) && seconds >= 1 && seconds <= 300;
 
 export const defaultTaskAction = (): TaskFormAction => ({ action: 1, text: "" });
 export const toSuccessKeywords = (value: string) => value.split("#").map((item) => item.trim()).filter(Boolean);
@@ -130,6 +132,7 @@ export function findInvalidChatIndex(chats: SignTaskChat[]): number {
     return chats.findIndex(chat => !chat.actions.length || chat.actions.some(action => {
         if (action.action === 1 || action.action === 3) return !action.text?.trim();
         if (action.action === 2) return !action.dice?.trim();
+        if (action.action === 10) return !isValidWaitSeconds(action.seconds);
         if (action.action === 9) return !action.keywords?.some(keyword => keyword.trim());
         return ![4, 5, 6, 7, 8].includes(Number(action.action));
     }));

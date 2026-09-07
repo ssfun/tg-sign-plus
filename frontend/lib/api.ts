@@ -508,6 +508,7 @@ export const exportAccountLogs = async (accountName: string) => {
 // ============ 签到任务管理 ============
 
 export type SignTaskAction =
+  | { action: 10; seconds: number }
   | { action: 1; text: string }
   | { action: 2; dice: string }
   | { action: 3; text: string }

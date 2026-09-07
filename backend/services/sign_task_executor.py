@@ -30,6 +30,7 @@ from backend.utils.tg_session import (
     get_global_semaphore,
 )
 from tg_signer_contracts.errors import BusinessRetryableError
+from tg_signer_contracts.wait_budget import action_wait_budget
 
 settings = get_settings()
 BackendUserSigner = None
@@ -309,6 +310,7 @@ class SignTaskExecutor:
             return configured_timeout
 
         default_event_timeout = cls._read_float_env("TG_EVENT_ENGINE_TIMEOUT", 120.0, minimum=1.0)
+        default_inline_retries = int(cls._read_float_env("TG_EVENT_ENGINE_INLINE_RETRIES", 3, minimum=0))
         event_budget = 0.0
         for chat in chats:
             if not isinstance(chat, dict):
@@ -319,6 +321,13 @@ class SignTaskExecutor:
                 minimum=1.0,
             )
             event_budget += event_timeout if event_timeout is not None else default_event_timeout
+            inline_retries = cls._optional_int(chat.get("event_retries"), minimum=0)
+            actions = chat.get("actions")
+            if isinstance(actions, list):
+                event_budget += action_wait_budget(
+                    actions,
+                    default_inline_retries if inline_retries is None else inline_retries,
+                )
 
         sign_interval = cls._optional_float(
             task_config.get("sign_interval"),

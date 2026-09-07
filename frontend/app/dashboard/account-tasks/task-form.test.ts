@@ -35,3 +35,17 @@ it("locates an invalid hidden chat after switching to another chat", () => {
     expect(findInvalidChatIndex(chats)).toBe(-1);
     expect(findInvalidChatIndex([{ ...chats[1], actions: [] }])).toBe(0);
 });
+
+
+it("preserves waits and repeated sends across editing and JSON export", () => {
+    const chat: SignTaskChat = { chat_id: 123, name: "Wait", actions: [
+        { action: 1, text: "/sign" }, { action: 10, seconds: 5 }, { action: 1, text: "/sign" },
+    ] };
+    const result = replaceEditedChat([chat], 0, edit(chat));
+    expect(JSON.parse(JSON.stringify(result))).toEqual([chat]);
+    expect(findInvalidChatIndex(result)).toBe(-1);
+});
+
+it.each([0, -1, 301, 1.5, NaN, Infinity])("rejects invalid wait seconds %s in hidden chats", seconds => {
+    expect(findInvalidChatIndex([...chats, { chat_id: 789, name: "Invalid", actions: [{ action: 10, seconds }] }])).toBe(2);
+});

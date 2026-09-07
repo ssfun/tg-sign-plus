@@ -25,6 +25,7 @@ from pyrogram.types import Message, Object, User
 
 from tg_signer.config import (
     ActionT,
+    WaitAction,
     AssertSuccessByTextAction,
     ClickKeyboardByTextAction,
     ChooseOptionByImageAction,
@@ -699,13 +700,17 @@ class UserSigner(BaseUserWorker[SignConfigV3]):
                 if len(actions) == 0 and action not in [
                     SupportAction.SEND_TEXT,
                     SupportAction.SEND_DICE,
+                    SupportAction.WAIT,
                 ]:
                     raise ValueError(
-                        f"第一个动作必须为「{SupportAction.SEND_TEXT.desc}」或「{SupportAction.SEND_DICE.desc}」"
+                        "第一个动作必须为发送文本、发送骰子或等待"
                     )
                 if action == SupportAction.SEND_TEXT:
                     text = local_input_("输入要发送的文本: ")
                     actions.append(SendTextAction(text=text))
+                elif action == SupportAction.WAIT:
+                    seconds = local_input_("等待秒数（1–300，默认 5）: ").strip() or "5"
+                    actions.append(WaitAction(seconds=int(seconds)))
                 elif action == SupportAction.SEND_DICE:
                     dice = local_input_("输入要发送的骰子（如 🎲, 🎯）: ")
                     actions.append(SendDiceAction(dice=dice))

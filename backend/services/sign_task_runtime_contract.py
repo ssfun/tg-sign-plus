@@ -381,7 +381,7 @@ EVENT_CLIENT_STARTUP_RETRY_FIELDS = (
 EVENT_ENGINE_NAME = "event"
 RUNTIME_CONTRACT_VERSION = 1
 
-SUPPORT_ACTION_IDS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+SUPPORT_ACTION_IDS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 SUPPORT_ACTION_REQUIRED_FIELDS = {
     1: ("text",),
     2: ("dice",),
@@ -538,6 +538,11 @@ def normalize_sign_action(action: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"动作 {action_id} 缺少必填字段 {field_name}")
         if field_name != "keywords":
             _normalize_required_action_text(normalized, field_name)
+
+    if action_id == 10:
+        seconds = normalized.get("seconds")
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or not 1 <= seconds <= 300:
+            raise ValueError("等待秒数必须为 1–300 的整数")
 
     if action_id == SUPPORT_ACTION_REPLY_IMAGE_ID:
         _normalize_reply_image_action_config(normalized)
