@@ -19,10 +19,9 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, StrictFloat, StrictInt, StrictStr, validator
-from sqlalchemy.orm import Session
 
-from backend.core.auth import get_current_user, verify_token
-from backend.core.database import get_db
+from backend.core.auth import get_current_user_readonly, verify_token
+from backend.core.database import get_session_local
 from backend.core.validators import ValidationError, validate_account_name
 from backend.repositories.sign_task_config_repo import get_sign_task_config_repo
 from backend.repositories.sign_task_history_repo import get_sign_task_history_repo
@@ -919,7 +918,7 @@ class EventEngineDiagnosticReportOut(BaseModel):
 @router.get("", response_model=List[SignTaskOut])
 def list_sign_tasks(
     account_name: Optional[str] = None,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     """
@@ -936,7 +935,7 @@ def list_sign_tasks(
 @router.get("/scheduler/status", response_model=SchedulerStatusOut)
 def get_scheduler_status_api(
     account_name: Optional[str] = None,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
 ):
     from backend.scheduler import get_scheduler_status
 
@@ -949,7 +948,7 @@ def get_canary_report_api(
     account_name: Optional[str] = None,
     history_limit: int = Query(1, ge=1, le=20),
     max_age_hours: float = Query(36.0, ge=0),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
 ):
     """兼容入口：汇总当前任务的事件引擎诊断报告。"""
 
@@ -977,7 +976,7 @@ def get_event_engine_report_api(
     account_name: Optional[str] = None,
     history_limit: int = Query(1, ge=1, le=20),
     max_age_hours: float = Query(36.0, ge=0),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
 ):
     """汇总当前账号真实签到任务的事件引擎诊断报告。"""
 
@@ -1003,7 +1002,7 @@ def get_event_engine_report_api(
 @router.post("", response_model=SignTaskOut, status_code=status.HTTP_201_CREATED)
 async def create_sign_task(
     payload: SignTaskCreate,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     """创建新的签到任务"""
@@ -1046,7 +1045,7 @@ async def create_sign_task(
 def get_sign_task(
     task_name: str,
     account_name: Optional[str] = None,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_optional_account_name(account_name)
@@ -1061,7 +1060,7 @@ async def update_sign_task(
     task_name: str,
     payload: SignTaskUpdate,
     account_name: Optional[str] = None,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     """更新签到任务"""
@@ -1122,7 +1121,7 @@ async def update_sign_task(
 async def set_sign_task_enabled(
     task_name: str,
     payload: SignTaskEnabledUpdate,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     """暂停或恢复任务自动调度；不影响手动运行。"""
@@ -1148,7 +1147,7 @@ async def set_sign_task_enabled(
 async def delete_sign_task(
     task_name: str,
     account_name: Optional[str] = None,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     """删除签到任务"""
@@ -1170,7 +1169,7 @@ async def delete_sign_task(
 def get_sign_task_status(
     task_name: str,
     account_name: str,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
@@ -1183,7 +1182,7 @@ def get_sign_task_status(
 async def run_sign_task(
     task_name: str,
     account_name: str,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     """手动运行签到任务"""
@@ -1203,7 +1202,7 @@ async def run_sign_task(
 def get_sign_task_logs(
     task_name: str,
     account_name: str | None = None,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_optional_account_name(account_name)
@@ -1216,7 +1215,7 @@ def get_sign_task_history(
     task_name: str,
     account_name: str,
     limit: int = Query(20, ge=1, le=200),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
@@ -1234,7 +1233,7 @@ def get_sign_task_history(
 def get_sign_task_history_state(
     task_name: str,
     account_name: str,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     state = service.get_history_state(task_name, _valid_account_name(account_name))
@@ -1249,7 +1248,8 @@ async def get_account_chats(
     force_refresh: bool = False,
     auto_refresh_if_expired: bool = False,
     ensure_exists: bool = False,
-    current_user=Depends(get_current_user),
+    include_items: bool = True,
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
@@ -1259,6 +1259,7 @@ async def get_account_chats(
             force_refresh=force_refresh,
             auto_refresh_if_expired=auto_refresh_if_expired,
             ensure_exists=ensure_exists,
+            include_items=include_items,
         )
     except ValueError as e:
         detail = str(e)
@@ -1284,7 +1285,8 @@ async def get_account_chats(
 @router.post("/chats/{account_name}/refresh", response_model=ChatCacheResponse)
 async def refresh_account_chats_api(
     account_name: str,
-    current_user=Depends(get_current_user),
+    include_items: bool = True,
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
@@ -1292,6 +1294,7 @@ async def refresh_account_chats_api(
         return await service.get_account_chats(
             account_name,
             force_refresh=True,
+            include_items=include_items,
         )
     except ValueError as e:
         detail = str(e)
@@ -1314,7 +1317,7 @@ async def refresh_account_chats_api(
 @router.get("/chats/{account_name}/meta", response_model=ChatCacheMetaResponse)
 def get_account_chat_cache_meta(
     account_name: str,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
@@ -1330,7 +1333,7 @@ def search_account_chats(
     q: str = "",
     limit: int = 50,
     offset: int = 0,
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_readonly),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
@@ -1348,7 +1351,6 @@ async def sign_task_logs_ws(
     task_name: str,
     account_name: str | None = Query(None),
     token: str = Query(...),
-    db: Session = Depends(get_db),
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     """
@@ -1356,7 +1358,8 @@ async def sign_task_logs_ws(
     """
     try:
         account_name = _valid_optional_account_name(account_name)
-        user = verify_token(token, db)
+        with get_session_local()() as db:
+            user = verify_token(token, db)
         if not user:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return

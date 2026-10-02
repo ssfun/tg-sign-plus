@@ -144,7 +144,14 @@ class SignTaskChatCacheService:
         finally:
             db.close()
 
-    def get_account_chat_cache(self, account_name: str) -> Dict[str, Any]:
+    def _load_items(self, db, account_name: str) -> List[Dict[str, Any]]:
+        rows = (db.query(AccountChatCacheItem)
+                .filter(AccountChatCacheItem.account_name == account_name)
+                .order_by(AccountChatCacheItem.title.asc(), AccountChatCacheItem.chat_id.asc())
+                .all())
+        return self._serialize_items(rows)
+
+    def get_account_chat_cache(self, account_name: str, *, include_items: bool = True) -> Dict[str, Any]:
         db = self._get_db()
         try:
             meta = (
@@ -152,22 +159,19 @@ class SignTaskChatCacheService:
                 .filter(AccountChatCacheMeta.account_name == account_name)
                 .first()
             )
-            items = (
-                db.query(AccountChatCacheItem)
-                .filter(AccountChatCacheItem.account_name == account_name)
-                .order_by(AccountChatCacheItem.title.asc(), AccountChatCacheItem.chat_id.asc())
-                .all()
-            )
+            items = self._load_items(db, account_name) if include_items else []
+            count = len(items) if include_items else db.query(AccountChatCacheItem).filter(
+                AccountChatCacheItem.account_name == account_name).count()
             ttl = self._resolve_cache_ttl_minutes(db, account_name)
             last_cached_at = meta.last_cached_at if meta else None
             expired = self._is_cache_expired(meta, ttl)
             self._cleanup_legacy_cache_file(account_name)
             return {
-                "items": self._serialize_items(items),
+                "items": items,
                 "last_cached_at": last_cached_at.isoformat() + "Z" if last_cached_at else None,
                 "cache_ttl_minutes": ttl,
                 "expired": expired,
-                "count": len(items),
+                "count": count,
             }
         finally:
             db.close()
@@ -179,26 +183,33 @@ class SignTaskChatCacheService:
         *,
         auto_refresh_if_expired: bool = False,
         ensure_exists: bool = False,
+        include_items: bool = True,
     ) -> Dict[str, Any]:
-        cache = self.get_account_chat_cache(account_name)
+        if include_items and not (force_refresh or auto_refresh_if_expired or ensure_exists):
+            return self.get_account_chat_cache(account_name)
+        cache = self.get_account_chat_cache(account_name, include_items=False)
         should_refresh = force_refresh
-        if ensure_exists and cache["count"] == 0:
+        if ensure_exists and not cache["last_cached_at"]:
             should_refresh = True
         if auto_refresh_if_expired and cache["expired"]:
             should_refresh = True
 
-        if not should_refresh:
-            return cache
-
         account_lock = get_account_lock(account_name)
-        if account_lock.locked():
+        if should_refresh and account_lock.locked():
             if force_refresh:
                 raise RuntimeError("账号当前正在执行任务，暂时无法刷新聊天列表，请稍后再试")
+            should_refresh = False
+
+        if not should_refresh:
+            if include_items:
+                with self._get_db() as db:
+                    cache["items"] = self._load_items(db, account_name)
+                cache["count"] = len(cache["items"])
             return cache
 
         items = await self.refresh_account_chats(account_name)
-        refreshed = self.get_account_chat_cache(account_name)
-        refreshed["items"] = items
+        refreshed = self.get_account_chat_cache(account_name, include_items=False)
+        refreshed["items"] = items if include_items else []
         refreshed["count"] = len(items)
         refreshed["expired"] = False
         return refreshed

@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from backend.core.auth import get_current_user
+from backend.core.auth import get_current_user_readonly
 from backend.core.validators import ValidationError, validate_account_name
 from backend.models.user import User
 from backend.services.sign_tasks import SignTaskService, get_sign_task_service
@@ -211,7 +211,7 @@ class AccountStatusCheckResponse(BaseModel):
 
 @router.post("/login/start", response_model=LoginStartResponse)
 async def start_account_login(
-    request: LoginStartRequest, current_user: User = Depends(get_current_user)
+    request: LoginStartRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     """
     开始账号登录流程（发送验证码）
@@ -243,7 +243,7 @@ async def start_account_login(
 
 
 @router.post("/login/cancel")
-async def cancel_account_login(request: LoginCancelRequest, current_user: User = Depends(get_current_user)):
+async def cancel_account_login(request: LoginCancelRequest, current_user: User = Depends(get_current_user_readonly)):
     try:
         cancelled = await get_telegram_service().cancel_phone_login(
             _valid_account_name(request.account_name), request.phone_number, request.phone_code_hash,
@@ -255,7 +255,7 @@ async def cancel_account_login(request: LoginCancelRequest, current_user: User =
 
 @router.post("/login/verify", response_model=LoginVerifyResponse)
 async def verify_account_login(
-    request: LoginVerifyRequest, current_user: User = Depends(get_current_user)
+    request: LoginVerifyRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     """
     验证账号登录（输入验证码和可选的2FA密码）
@@ -297,7 +297,7 @@ async def verify_account_login(
 
 @router.post("/qr/start", response_model=QrLoginStartResponse)
 async def start_qr_login(
-    request: QrLoginStartRequest, current_user: User = Depends(get_current_user)
+    request: QrLoginStartRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     """开始扫码登录流程"""
     try:
@@ -346,7 +346,7 @@ async def start_qr_login(
 
 @router.get("/qr/status", response_model=QrLoginStatusResponse)
 async def get_qr_login_status(
-    login_id: str, current_user: User = Depends(get_current_user)
+    login_id: str, current_user: User = Depends(get_current_user_readonly)
 ):
     """获取扫码登录状态"""
     try:
@@ -372,7 +372,7 @@ async def get_qr_login_status(
 
 @router.post("/qr/password", response_model=QrLoginPasswordResponse)
 async def submit_qr_login_password(
-    request: QrLoginPasswordRequest, current_user: User = Depends(get_current_user)
+    request: QrLoginPasswordRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     """提交扫码登录 2FA 密码"""
     try:
@@ -402,7 +402,7 @@ async def submit_qr_login_password(
 
 @router.post("/qr/cancel", response_model=QrLoginCancelResponse)
 async def cancel_qr_login(
-    request: QrLoginCancelRequest, current_user: User = Depends(get_current_user)
+    request: QrLoginCancelRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     """取消扫码登录"""
     try:
@@ -419,7 +419,7 @@ async def cancel_qr_login(
 
 
 @router.get("", response_model=AccountListResponse)
-def list_accounts(current_user: User = Depends(get_current_user)):
+def list_accounts(current_user: User = Depends(get_current_user_readonly)):
     """
     获取所有账号列表
 
@@ -441,7 +441,7 @@ def list_accounts(current_user: User = Depends(get_current_user)):
 
 @router.post("/status/check", response_model=AccountStatusCheckResponse)
 async def check_accounts_status(
-    request: AccountStatusCheckRequest, current_user: User = Depends(get_current_user)
+    request: AccountStatusCheckRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     """
     批量检测账号状态。
@@ -497,7 +497,7 @@ async def check_accounts_status(
 
 @router.delete("/{account_name}", response_model=DeleteAccountResponse)
 async def delete_account(
-    account_name: str, current_user: User = Depends(get_current_user)
+    account_name: str, current_user: User = Depends(get_current_user_readonly)
 ):
     """
     删除账号（删除已保存的账号会话）
@@ -529,7 +529,7 @@ async def delete_account(
 
 @router.get("/{account_name}/exists")
 def check_account_exists(
-    account_name: str, current_user: User = Depends(get_current_user)
+    account_name: str, current_user: User = Depends(get_current_user_readonly)
 ):
     """检查账号是否存在"""
     account_name = _valid_account_name(account_name)
@@ -541,7 +541,7 @@ def check_account_exists(
 def update_account(
     account_name: str,
     request: AccountUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_readonly),
     sign_task_service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
@@ -659,7 +659,7 @@ class ClearAccountLogsResponse(BaseModel):
 def get_account_logs(
     account_name: str,
     limit: int = Query(100, ge=1, le=1000),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_readonly),
     sign_task_service: SignTaskService = Depends(get_sign_task_service),
 ):
     """获取账号的任务执行历史日志"""
@@ -696,7 +696,7 @@ def get_account_logs(
 @router.post("/{account_name}/logs/clear", response_model=ClearAccountLogsResponse)
 def clear_account_logs(
     account_name: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_readonly),
     sign_task_service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
@@ -723,7 +723,7 @@ def clear_account_logs(
 @router.get("/{account_name}/logs/export")
 def export_account_logs(
     account_name: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_readonly),
     sign_task_service: SignTaskService = Depends(get_sign_task_service),
 ):
     """导出账号日志为 txt 文件"""

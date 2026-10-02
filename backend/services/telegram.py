@@ -25,6 +25,7 @@ from backend.utils.tg_session import (
     get_account_session_string,
     get_global_semaphore,
     list_account_names,
+    list_account_profiles,
     set_account_session_string,
 )
 
@@ -72,10 +73,10 @@ class TelegramService:
                 pending_accounts.add(name)
 
         try:
-            for account_name in list_account_names():
+            for profile in list_account_profiles():
+                account_name = profile["account_name"]
                 if account_name in pending_accounts:
                     continue
-                profile = get_account_profile(account_name)
                 accounts.append(
                     {
                         "name": account_name,

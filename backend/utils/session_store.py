@@ -19,6 +19,10 @@ class SessionStore(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def list_profiles(self) -> List[Dict[str, Any]]:
+        ...
+
+    @abc.abstractmethod
     def get_session_string(self, account_name: str) -> Optional[str]:
         ...
 
@@ -78,6 +82,14 @@ class DatabaseSessionStore(SessionStore):
         finally:
             db.close()
 
+    def list_profiles(self) -> List[Dict[str, Any]]:
+        from backend.models.account_session import AccountSession as Account
+
+        with self._get_db() as db:
+            rows = db.query(Account.account_name, Account.remark, Account.proxy,
+                            Account.chat_cache_ttl_minutes).all()
+            return [dict(row._mapping) for row in rows]
+
     def set_session_string(self, account_name: str, session_string: str) -> None:
         from backend.models.account_session import AccountSession
 
@@ -118,7 +130,8 @@ class DatabaseSessionStore(SessionStore):
 
         db = self._get_db()
         try:
-            row = db.query(AccountSession).filter_by(account_name=account_name).first()
+            row = db.query(AccountSession.remark, AccountSession.proxy,
+                           AccountSession.chat_cache_ttl_minutes).filter_by(account_name=account_name).first()
             if not row:
                 return {}
             return {

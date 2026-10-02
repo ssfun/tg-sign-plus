@@ -36,6 +36,10 @@ def list_account_names() -> list[str]:
     return get_session_store().list_account_names()
 
 
+def list_account_profiles() -> list[dict[str, Any]]:
+    return get_session_store().list_profiles()
+
+
 def get_account_session_string(account_name: str) -> Optional[str]:
     return get_session_store().get_session_string(account_name)
 
@@ -81,4 +85,3 @@ def set_account_profile(
         proxy=proxy,
         chat_cache_ttl_minutes=chat_cache_ttl_minutes,
     )
-

@@ -1152,19 +1152,22 @@ export const getSignTaskStatus = (name: string, accountName: string, signal?: Ab
 
 export const getAccountChats = (
   accountName: string,
-  options?: { forceRefresh?: boolean; autoRefreshIfExpired?: boolean; ensureExists?: boolean }
+  options?: { forceRefresh?: boolean; autoRefreshIfExpired?: boolean; ensureExists?: boolean; includeItems?: boolean },
+  signal?: AbortSignal
 ) => {
   const params = new URLSearchParams();
   if (options?.forceRefresh) params.append("force_refresh", "true");
   if (options?.autoRefreshIfExpired) params.append("auto_refresh_if_expired", "true");
   if (options?.ensureExists) params.append("ensure_exists", "true");
+  if (options?.includeItems === false) params.append("include_items", "false");
   const query = params.toString();
-  return request<ChatCacheResponse>(`/sign-tasks/chats/${pathSegment(accountName)}${query ? `?${query}` : ""}`);
+  return request<ChatCacheResponse>(`/sign-tasks/chats/${pathSegment(accountName)}${query ? `?${query}` : ""}`, { signal });
 };
 
-export const refreshAccountChats = (accountName: string) =>
-  request<ChatCacheResponse>(`/sign-tasks/chats/${pathSegment(accountName)}/refresh`, {
+export const refreshAccountChats = (accountName: string, includeItems = true, signal?: AbortSignal) =>
+  request<ChatCacheResponse>(`/sign-tasks/chats/${pathSegment(accountName)}/refresh?include_items=${includeItems}`, {
     method: "POST",
+    signal,
   });
 
 export const getAccountChatCacheMeta = (accountName: string) =>
@@ -1174,13 +1177,14 @@ export const searchAccountChats = (
   accountName: string,
   query: string,
   limit: number = 50,
-  offset: number = 0
+  offset: number = 0,
+  signal?: AbortSignal
 ) => {
   const params = new URLSearchParams();
   params.append("q", query);
   params.append("limit", String(limit));
   params.append("offset", String(offset));
-  return request<ChatSearchResponse>(`/sign-tasks/chats/${pathSegment(accountName)}/search?${params.toString()}`);
+  return request<ChatSearchResponse>(`/sign-tasks/chats/${pathSegment(accountName)}/search?${params.toString()}`, { signal });
 };
 
 export const getSignTaskLogs = (name: string, accountName?: string) => {

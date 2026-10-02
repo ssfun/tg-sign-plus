@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, StrictBool
 
-from backend.core.auth import get_current_user
+from backend.core.auth import get_current_user_readonly
 from backend.models.user import User
 from backend.services.config import get_config_service
 from backend.services.sign_tasks import SignTaskService, get_sign_task_service
@@ -60,7 +60,7 @@ class TaskListResponse(BaseModel):
 
 
 @router.get("/tasks", response_model=TaskListResponse)
-def list_all_tasks(current_user: User = Depends(get_current_user)):
+def list_all_tasks(current_user: User = Depends(get_current_user_readonly)):
     try:
         sign_tasks = get_config_service().list_sign_tasks()
         return TaskListResponse(
@@ -78,7 +78,7 @@ def list_all_tasks(current_user: User = Depends(get_current_user)):
 def export_sign_task(
     task_name: str,
     account_name: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_readonly),
 ):
     try:
         config_json = get_config_service().export_sign_task(
@@ -108,7 +108,7 @@ def export_sign_task(
 @router.post("/import/sign", response_model=ImportTaskResponse)
 async def import_sign_task(
     request: ImportTaskRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_readonly),
     sign_task_service: SignTaskService = Depends(get_sign_task_service),
 ):
     try:
@@ -144,7 +144,7 @@ async def import_sign_task(
 
 
 @router.get("/export/all")
-def export_all_configs(current_user: User = Depends(get_current_user)):
+def export_all_configs(current_user: User = Depends(get_current_user_readonly)):
     try:
         config_json = get_config_service().export_all_configs()
         return Response(
@@ -164,7 +164,7 @@ def export_all_configs(current_user: User = Depends(get_current_user)):
 @router.post("/import/all", response_model=ImportAllResponse)
 async def import_all_configs(
     request: ImportAllRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_readonly),
     sign_task_service: SignTaskService = Depends(get_sign_task_service),
 ):
     try:
@@ -203,7 +203,7 @@ async def import_all_configs(
 async def delete_sign_task(
     task_name: str,
     account_name: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_readonly),
     sign_task_service: SignTaskService = Depends(get_sign_task_service),
 ):
     try:
@@ -257,7 +257,7 @@ class AITestResponse(BaseModel):
 
 
 @router.get("/ai", response_model=AIConfigResponse)
-def get_ai_config(current_user: User = Depends(get_current_user)):
+def get_ai_config(current_user: User = Depends(get_current_user_readonly)):
     try:
         config = get_config_service().get_ai_config()
         if not config:
@@ -288,7 +288,7 @@ def get_ai_config(current_user: User = Depends(get_current_user)):
 
 @router.post("/ai", response_model=AIConfigSaveResponse)
 def save_ai_config(
-    request: AIConfigRequest, current_user: User = Depends(get_current_user)
+    request: AIConfigRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     try:
         get_config_service().save_ai_config(
@@ -307,7 +307,7 @@ def save_ai_config(
 
 
 @router.post("/ai/test", response_model=AITestResponse)
-async def test_ai_connection(current_user: User = Depends(get_current_user)):
+async def test_ai_connection(current_user: User = Depends(get_current_user_readonly)):
     try:
         result = await get_config_service().test_ai_connection()
         return AITestResponse(**result)
@@ -316,7 +316,7 @@ async def test_ai_connection(current_user: User = Depends(get_current_user)):
 
 
 @router.delete("/ai", response_model=AIConfigSaveResponse)
-def delete_ai_config(current_user: User = Depends(get_current_user)):
+def delete_ai_config(current_user: User = Depends(get_current_user_readonly)):
     try:
         get_config_service().delete_ai_config()
         return AIConfigSaveResponse(success=True, message="AI config deleted")
@@ -340,7 +340,7 @@ class GlobalSettingsResponse(BaseModel):
 
 
 @router.get("/settings", response_model=GlobalSettingsResponse)
-def get_global_settings(current_user: User = Depends(get_current_user)):
+def get_global_settings(current_user: User = Depends(get_current_user_readonly)):
     try:
         settings = get_config_service().get_global_settings()
         return GlobalSettingsResponse(**settings)
@@ -353,7 +353,7 @@ def get_global_settings(current_user: User = Depends(get_current_user)):
 
 @router.post("/settings", response_model=AIConfigSaveResponse)
 def save_global_settings(
-    request: GlobalSettingsRequest, current_user: User = Depends(get_current_user)
+    request: GlobalSettingsRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     try:
         settings = {
@@ -395,7 +395,7 @@ class TelegramConfigSaveResponse(BaseModel):
 
 
 @router.get("/telegram", response_model=TelegramConfigResponse)
-def get_telegram_config(current_user: User = Depends(get_current_user)):
+def get_telegram_config(current_user: User = Depends(get_current_user_readonly)):
     try:
         config = get_config_service().get_telegram_config()
         service = get_config_service()
@@ -418,7 +418,7 @@ def get_telegram_config(current_user: User = Depends(get_current_user)):
 
 @router.post("/telegram", response_model=TelegramConfigSaveResponse)
 def save_telegram_config(
-    request: TelegramConfigRequest, current_user: User = Depends(get_current_user)
+    request: TelegramConfigRequest, current_user: User = Depends(get_current_user_readonly)
 ):
     try:
         existing = get_config_service().get_telegram_config()
@@ -449,7 +449,7 @@ def save_telegram_config(
 
 
 @router.delete("/telegram", response_model=TelegramConfigSaveResponse)
-def reset_telegram_config(current_user: User = Depends(get_current_user)):
+def reset_telegram_config(current_user: User = Depends(get_current_user_readonly)):
     try:
         get_config_service().reset_telegram_config()
         return TelegramConfigSaveResponse(success=True, message="Telegram config reset")

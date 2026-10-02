@@ -6,7 +6,7 @@ import pathlib
 import random
 import sqlite3
 import time
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from datetime import time as dt_time
@@ -50,7 +50,6 @@ from .callback_actions import request_callback_answer
 from .client_manager import Client, close_client_by_name, get_api_config, get_client, get_proxy
 from .event_runner import EventRunStatus, SignEventRunner
 from .message_helpers import readable_chat, readable_message
-from .message_receivers import handle_edited_message, handle_incoming_message, store_incoming_message
 from .notification.server_chan import sc_send
 from .scheduled_messages import get_scheduled_messages, schedule_messages
 from .text_cleaners import clean_text_for_match, clean_text_for_send
@@ -627,8 +626,6 @@ class UserSignerWorkerContext(BaseModel):
         arbitrary_types_allowed = True
 
     waiter: Waiter
-    sign_chats: dict  # 签到配置列表, int -> list[SignChatV3]
-    chat_messages: dict  # 收到的消息, int -> dict[int, Optional[Message]]
     last_callback_texts: dict  # 最近一次按钮弹窗文案, int -> str
     event_runners: dict  # 事件驱动签到 runner, int -> SignEventRunner
     event_tasks: set  # 事件驱动消息处理任务
@@ -643,8 +640,6 @@ class UserSigner(BaseUserWorker[SignConfigV3]):
     def ensure_ctx(self) -> UserSignerWorkerContext:
         return UserSignerWorkerContext(
             waiter=Waiter(),
-            sign_chats=defaultdict(list),
-            chat_messages=defaultdict(dict),
             last_callback_texts={},
             event_runners={},
             event_tasks=set(),
@@ -1056,7 +1051,6 @@ class UserSigner(BaseUserWorker[SignConfigV3]):
             success_count = 0
             total_chats = len(config.chats)
             for index, chat in enumerate(config.chats):
-                self.context.sign_chats[chat.chat_id].append(chat)
                 try:
                     await self.sign_a_chat(chat)
                     success_count += 1
@@ -1065,7 +1059,6 @@ class UserSigner(BaseUserWorker[SignConfigV3]):
                     logger.warning(_e, exc_info=True)
                     continue
 
-                self.context.chat_messages[chat.chat_id].clear()
                 if index < total_chats - 1 and config.sign_interval > 0:
                     await asyncio.sleep(config.sign_interval)
 
@@ -1165,19 +1158,21 @@ class UserSigner(BaseUserWorker[SignConfigV3]):
         async with self.app:
             await self.send_dice(chat_id, emoji, delete_after, **kwargs)
 
-    async def _on_message(self, client: Client, message: Message):
-        await store_incoming_message(
-            message=message,
-            context=self.context,
-            log=self.log,
-        )
-
-    async def _dispatch_event_runner_message(self, message: Message):
+    async def _dispatch_event_runner_message(self, message: Message, *, edited: bool = False):
         if not getattr(message, "chat", None):
             return
         runner = self.context.event_runners.get(message.chat.id)
         if runner is None:
             return
+        from_user = message.from_user
+        sender = (from_user.username or from_user.id) if from_user else "unknown"
+        description = "对消息的更新，消息:" if edited else "的消息:"
+        self.log(
+            f"收到来自「{sender}」{description} {readable_message(message)}",
+            stage="message",
+            event="edited_message" if edited else "incoming_message",
+            meta={"chat_id": message.chat.id, "message_id": message.id, "sender": str(sender)},
+        )
         task = asyncio.create_task(runner.handle_message(message))
         self.context.event_tasks.add(task)
         task.add_done_callback(self._on_event_runner_task_done)
@@ -1207,22 +1202,10 @@ class UserSigner(BaseUserWorker[SignConfigV3]):
         self.context.event_tasks.difference_update(tasks)
 
     async def on_message(self, client: Client, message: Message):
-        await handle_incoming_message(
-            client=client,
-            message=message,
-            context=self.context,
-            log=self.log,
-        )
         await self._dispatch_event_runner_message(message)
 
     async def on_edited_message(self, client, message: Message):
-        await handle_edited_message(
-            client=client,
-            message=message,
-            context=self.context,
-            log=self.log,
-        )
-        await self._dispatch_event_runner_message(message)
+        await self._dispatch_event_runner_message(message, edited=True)
 
     def _clean_text_for_match(self, text: str) -> str:
         return clean_text_for_match(text)

@@ -13,7 +13,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from backend.core.config import get_settings
-from backend.core.database import get_db
+from backend.core.database import get_db, get_session_local
 from backend.core.security import verify_password
 from backend.models.refresh_token import RefreshToken
 from backend.models.user import User
@@ -90,6 +90,16 @@ def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+
+def get_current_user_readonly(token: str = Depends(oauth2_scheme)) -> User:
+    """Authenticate without holding a connection while external operations await.
+
+    User-setting mutations continue to use get_current_user and their shared
+    transaction. All scalar fields on this returned user are loaded before close.
+    """
+    with get_session_local()() as db:
+        return get_current_user(token, db)
 
 
 # OAuth2 scheme that doesn't auto-error on missing token

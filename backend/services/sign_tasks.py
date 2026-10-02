@@ -337,12 +337,14 @@ class SignTaskService:
         *,
         auto_refresh_if_expired: bool = False,
         ensure_exists: bool = False,
+        include_items: bool = True,
     ) -> Dict[str, Any]:
         return await self.chat_cache_service.get_account_chats(
             account_name,
             force_refresh=force_refresh,
             auto_refresh_if_expired=auto_refresh_if_expired,
             ensure_exists=ensure_exists,
+            include_items=include_items,
         )
 
     def search_account_chats(

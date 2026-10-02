@@ -22,10 +22,13 @@ import backend.models  # noqa: F401
 
 
 @pytest.fixture
-def panel():
+def panel(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine)
+    # Read-only authentication owns a short session instead of the route's
+    # transaction. Keep both session factories on this isolated test database.
+    monkeypatch.setattr("backend.core.auth.get_session_local", lambda: sessions)
     with sessions() as db:
         db.add(User(username="admin", password_hash=hash_password("Regression123!"), totp_secret="JBSWY3DPEHPK3PXP"))
         db.commit()

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ensureAccessToken, logout } from "../../../lib/auth";
-import { listSignTasks, deleteSignTask, runSignTask, getSignTaskHistory, getSignTaskHistoryState, getAccountChats, refreshAccountChats, searchAccountChats, createSignTask, updateSignTask, setSignTaskEnabled, exportSignTask, importSignTask, getSchedulerStatus, SignTask, SignTaskChat, SignTaskHistoryItem, ChatInfo, CreateSignTaskRequest, SchedulerStatus } from "../../../lib/api";
+import { listSignTasks, deleteSignTask, runSignTask, getSignTaskHistory, getSignTaskHistoryState, createSignTask, updateSignTask, setSignTaskEnabled, exportSignTask, importSignTask, getSchedulerStatus, SignTask, SignTaskChat, SignTaskHistoryItem, CreateSignTaskRequest, SchedulerStatus } from "../../../lib/api";
 import { Plus, Trash, Spinner, ArrowClockwise, ListDashes, DotsThreeVertical, Robot, MathOperations, Copy, ClipboardText, Lightning, CaretLeft, Gear, SignOut } from "@phosphor-icons/react";
 import { ToastContainer, useToast } from "../../../components/ui/toast";
 import { PageLoading } from "../../../components/ui/page-loading";
@@ -23,6 +23,7 @@ import { useLanguage } from "../../../context/LanguageContext";
 import { HistoryLogView, formatFlowDateTime, runSummaryStatusLabel, runSummaryTone, compactRunSummaryParts, getHistoryDiagnostics, formatHistoryForAi, formatHistoryRawJson, HistoryFlowGroups } from "./task-history";
 
 import { TaskItem } from "./task-item";
+import { ChatPicker } from "./chat-picker";
 
 import { isValidWaitSeconds, ActionTypeOption, TaskFormAction, isSuccessAssertionAction, TaskFormState, defaultTaskAction, toSuccessKeywords, toTaskFormAction, DICE_OPTIONS } from "./task-form";
 
@@ -50,17 +51,12 @@ export default function AccountTasksContent() {
 
     const [token, setLocalToken] = useState<string | null>(null);
     const [tasks, setTasks] = useState<SignTask[]>([]);
-    const [chats, setChats] = useState<ChatInfo[]>([]);
     const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
-    const [chatSearch, setChatSearch] = useState("");
-    const [chatSearchResults, setChatSearchResults] = useState<ChatInfo[]>([]);
-    const [chatSearchLoading, setChatSearchLoading] = useState(false);
     const [loading, setLoading] = useState(false);
     const [runningTaskName, setRunningTaskName] = useState<string | null>(null);
     const runHistoryBaseline = useRef<{ account: string; task: string; time: string | null | undefined } | null>(null);
     const [liveMonitorTaskName, setLiveMonitorTaskName] = useState<string | null>(null);
     const [refreshingChats, setRefreshingChats] = useState(false);
-    const [chatCacheMeta, setChatCacheMeta] = useState<{ last_cached_at?: string | null; cache_ttl_minutes: number; expired: boolean; count: number } | null>(null);
     const [historyTaskName, setHistoryTaskName] = useState<string | null>(null);
     const [historyLogs, setHistoryLogs] = useState<SignTaskHistoryItem[]>([]);
     const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
@@ -73,7 +69,6 @@ export default function AccountTasksContent() {
     const addToastRef = useRef(addToast);
     const tRef = useRef(t);
     const historyTaskNameRef = useRef<string | null>(null);
-    const chatDialogLoadKeyRef = useRef<string | null>(null);
     useEffect(() => {
         addToastRef.current = addToast;
         tRef.current = t;
@@ -286,41 +281,6 @@ export default function AccountTasksContent() {
         }
     }, [accountName, formatErrorMessage, handleAccountSessionInvalid]);
 
-    const loadChatCache = useCallback(async (options?: { forceRefresh?: boolean; autoRefreshIfExpired?: boolean; ensureExists?: boolean; silent?: boolean }) => {
-        if (!token || !accountName) return;
-        try {
-            if (!options?.silent) {
-                setRefreshingChats(true);
-            }
-            const res = options?.forceRefresh
-                ? await refreshAccountChats(accountName)
-                : await getAccountChats(accountName, {
-                    autoRefreshIfExpired: options?.autoRefreshIfExpired,
-                    ensureExists: options?.ensureExists,
-                });
-            setChats(res.items || []);
-            setChatCacheMeta({
-                last_cached_at: res.last_cached_at,
-                cache_ttl_minutes: res.cache_ttl_minutes,
-                expired: res.expired,
-                count: res.count,
-            });
-            return res;
-        } catch (err: any) {
-            if (handleAccountSessionInvalid(err)) return;
-            if (!options?.silent) {
-                const toast = addToastRef.current;
-                if (toast) {
-                    toast(formatErrorMessage(options?.forceRefresh ? "refresh_failed" : "load_failed", err), "error");
-                }
-            }
-        } finally {
-            if (!options?.silent) {
-                setRefreshingChats(false);
-            }
-        }
-    }, [token, accountName, handleAccountSessionInvalid, formatErrorMessage]);
-
     useEffect(() => {
         let mounted = true;
 
@@ -344,69 +304,6 @@ export default function AccountTasksContent() {
             mounted = false;
         };
     }, [accountName, loadData, router]);
-
-    useEffect(() => {
-        if (!token || !accountName) return;
-        const query = chatSearch.trim();
-        if (!query) {
-            setChatSearchResults([]);
-            setChatSearchLoading(false);
-            return;
-        }
-        let cancelled = false;
-        setChatSearchLoading(true);
-        const timer = setTimeout(async () => {
-            try {
-                const res = await searchAccountChats(accountName, query, 50, 0);
-                if (!cancelled) {
-                    setChatSearchResults(res.items || []);
-                }
-            } catch (err: any) {
-                if (!cancelled) {
-                    if (handleAccountSessionInvalid(err)) return;
-                    const toast = addToastRef.current;
-                    if (toast) {
-                        toast(formatErrorMessage("search_failed", err), "error");
-                    }
-                    setChatSearchResults([]);
-                }
-            } finally {
-                if (!cancelled) {
-                    setChatSearchLoading(false);
-                }
-            }
-        }, 300);
-        return () => {
-            cancelled = true;
-            clearTimeout(timer);
-        };
-    }, [chatSearch, token, accountName, formatErrorMessage, handleAccountSessionInvalid]);
-
-    useEffect(() => {
-        const dialogOpen = showCreateDialog || showEditDialog;
-        if (!dialogOpen) {
-            chatDialogLoadKeyRef.current = null;
-            setChatSearch("");
-            setChatSearchResults([]);
-            setChatSearchLoading(false);
-            return;
-        }
-        const dialogType = showCreateDialog ? "create" : "edit";
-        const loadKey = `${accountName}:${dialogType}`;
-        if (chatDialogLoadKeyRef.current === loadKey) {
-            return;
-        }
-        chatDialogLoadKeyRef.current = loadKey;
-        void loadChatCache({ autoRefreshIfExpired: true, ensureExists: true });
-    }, [showCreateDialog, showEditDialog, accountName, loadChatCache]);
-
-    useEffect(() => {
-        chatDialogLoadKeyRef.current = null;
-        setChats([]);
-        setChatCacheMeta(null);
-        setChatSearch("");
-        setChatSearchResults([]);
-    }, [accountName]);
 
     useEffect(() => {
         if (!shouldOpenCreate || !token || !accountName) return;
@@ -493,13 +390,6 @@ export default function AccountTasksContent() {
         }
         await loadData();
     });
-
-    const handleRefreshChats = async () => {
-        const res = await loadChatCache({ forceRefresh: true });
-        if (res) {
-            addToast(t("chats_refreshed"), "success");
-        }
-    };
 
     const applyChatSelection = (chatId: number, chatName: string) => {
         if (showCreateDialog) {
@@ -1363,134 +1253,14 @@ export default function AccountTasksContent() {
                     )}
                     <div className="glass-panel !bg-[var(--bg-tertiary)] space-y-4 border-[var(--border-secondary)] p-4">
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                            <div className="space-y-2 min-w-0">
-                                <div className="flex min-h-7 items-center">
-                                    <label className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">{t("search_chat")}</label>
-                                </div>
-                                <Input
-                                    placeholder={t("search_chat_placeholder")}
-                                    value={chatSearch}
-                                    onChange={(e) => setChatSearch(e.target.value)}
-                                />
-                                <div className="min-h-[12rem] rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)]">
-                                    {chatSearch.trim() ? (
-                                        <div className="max-h-48 overflow-y-auto">
-                                            {chatSearchLoading ? (
-                                                <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">{t("searching")}</div>
-                                            ) : chatSearchResults.length > 0 ? (
-                                                <div className="flex flex-col">
-                                                    {chatSearchResults.map((chat) => {
-                                                        const title = chat.title || chat.username || String(chat.id);
-                                                        return (
-                                                            <button
-                                                                key={chat.id}
-                                                                type="button"
-                                                                className="border-b border-[var(--border-secondary)] px-3 py-2 text-left transition-colors hover:bg-[var(--bg-primary)] last:border-b-0"
-                                                                onClick={() => {
-                                                                    applyChatSelection(chat.id, title);
-                                                                    setChatSearch("");
-                                                                    setChatSearchResults([]);
-                                                                }}
-                                                            >
-                                                                <div className="truncate text-sm font-semibold">{title}</div>
-                                                                <div className="truncate font-mono text-[10px] text-[var(--text-tertiary)]">
-                                                                    {chat.id}{chat.username ? ` · @${chat.username}` : ""}
-                                                                </div>
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : (
-                                                <div className="px-3 py-2 text-xs text-[var(--text-tertiary)]">{t("search_no_results")}</div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="flex h-full min-h-[12rem] items-center justify-center px-4 text-center text-xs text-[var(--text-tertiary)]">
-                                            {t("search_chat_placeholder")}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="space-y-2 min-w-0">
-                                <div className="flex min-h-7 items-center justify-between gap-2">
-                                    <label className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">{t("select_from_list")}</label>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={handleRefreshChats}
-                                        disabled={refreshingChats}
-                                        className="h-7 shrink-0 px-2 text-[10px] font-bold uppercase tracking-tighter text-[var(--accent)] hover:text-[var(--accent-hover)]"
-                                        title={t("refresh_chat_title")}
-                                    >
-                                        {refreshingChats ? (
-                                            <div className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent"></div>
-                                        ) : (
-                                            <ArrowClockwise weight="bold" size={12} />
-                                        )}
-                                        {t("refresh_list")}
-                                    </Button>
-                                </div>
-                                <select
-                                    className={selectClassName}
-                                    value={showCreateDialog ? newTask.chat_id : editTask.chat_id}
-                                    onChange={(e) => {
-                                        const id = parseInt(e.target.value);
-                                        const chat = chats.find((c) => c.id === id);
-                                        const chatName = chat?.title || chat?.username || "";
-                                        applyChatSelection(id, chatName);
-                                    }}
-                                >
-                                    <option value={0}>{t("select_from_list")}</option>
-                                    {chats.map((chat) => (
-                                        <option key={chat.id} value={chat.id}>
-                                            {chat.title || chat.username || chat.id}
-                                        </option>
-                                    ))}
-                                </select>
-                                <div className="min-h-[12rem] rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2">
-                                    <div className="max-h-44 overflow-y-auto rounded-md">
-                                        {chats.length > 0 ? (
-                                            <div className="flex flex-col">
-                                                {chats.map((chat) => {
-                                                    const title = chat.title || chat.username || String(chat.id);
-                                                    const selectedChatId = showCreateDialog ? newTask.chat_id : editTask.chat_id;
-                                                    const isSelected = selectedChatId === chat.id;
-                                                    return (
-                                                        <button
-                                                            key={chat.id}
-                                                            type="button"
-                                                            className={cn(
-                                                                "rounded-md px-3 py-2 text-left transition-colors",
-                                                                isSelected ? "bg-[var(--bg-tertiary)]" : "hover:bg-[var(--bg-primary)]"
-                                                            )}
-                                                            onClick={() => applyChatSelection(chat.id, title)}
-                                                        >
-                                                            <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{title}</div>
-                                                            <div className="truncate font-mono text-[10px] text-[var(--text-tertiary)]">
-                                                                {chat.id}{chat.username ? ` · @${chat.username}` : ""}
-                                                            </div>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : (
-                                            <div className="flex h-full min-h-[11rem] items-center justify-center px-4 text-center text-xs text-[var(--text-tertiary)]">
-                                                {t("select_from_list")}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="space-y-2 md:col-span-2">
-                                {chatCacheMeta ? (
-                                    <div className="px-1 text-[10px] leading-4 text-[var(--text-tertiary)]/80">
-                                        上次缓存：{chatCacheMeta.last_cached_at ? new Date(chatCacheMeta.last_cached_at).toLocaleString() : "未缓存"} · TTL {chatCacheMeta.cache_ttl_minutes} 分钟
-                                    </div>
-                                ) : null}
-                            </div>
+                            <ChatPicker key={`${accountName}:${showCreateDialog ? "create" : "edit"}`}
+                                accountName={accountName}
+                                selectedId={showCreateDialog ? newTask.chat_id : editTask.chat_id}
+                                onSelect={applyChatSelection}
+                                onBusyChange={setRefreshingChats}
+                                onError={error => {
+                                    if (!handleAccountSessionInvalid(error)) addToast(formatErrorMessage("load_failed", error), "error");
+                                }} />
 
                             <div className="space-y-2">
                                 <label className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">{t("manual_chat_id")}</label>
