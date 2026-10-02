@@ -385,14 +385,12 @@ class ConfigService:
         try:
             from openai import AsyncOpenAI
 
-            client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-
-            # 发送一个简单的测试请求
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "Say 'test ok' in 2 words"}],
-                max_tokens=10,
-            )
+            async with AsyncOpenAI(api_key=api_key, base_url=base_url) as client:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": "Say 'test ok' in 2 words"}],
+                    max_tokens=10,
+                )
 
             return {
                 "success": True,

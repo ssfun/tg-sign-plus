@@ -15,6 +15,21 @@ from backend.services.sign_task_runtime_contract import (
     EVENT_RUNTIME_SHAPE_SUMMARY_FIELDS,
 )
 
+
+def compact_run_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep list metadata separate from the diagnostic log bodies."""
+    items = entry.get("flow_items") or []
+    success = bool(entry.get("success", False))
+    return {
+        "time": entry.get("time", ""),
+        "success": success,
+        "message": entry.get("message", "") or "",
+        "flow_event_counts": entry.get("flow_event_counts") or build_flow_event_counts(items),
+        "run_summary": sanitize_public_run_summary(entry.get("run_summary")) or build_run_summary(
+            items, success=success, error="" if success else entry.get("message", ""),
+        ),
+    }
+
 _SENSITIVE_ERROR_PATTERNS = (
     (re.compile(r"(?i)(chat[_\s-]*id\s*[:=]\s*)-?\d+"), r"\1<redacted>"),
     (re.compile(r"(?i)(account[_\s-]*name\s*[:=]\s*)[^\s,;，。)]+"), r"\1<redacted>"),

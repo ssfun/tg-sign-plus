@@ -31,6 +31,7 @@ def login_env(monkeypatch):
     )
     monkeypatch.setattr(sign_tasks, "get_sign_task_service", lambda: cache)
     monkeypatch.setattr(telegram, "get_global_semaphore", lambda: semaphore)
+    monkeypatch.setattr(telegram, "get_account_lock", lambda name: lock)
     monkeypatch.setattr(telegram, "_login_sessions", {})
     monkeypatch.setattr(telegram, "_qr_login_sessions", {})
     monkeypatch.setattr(
@@ -85,7 +86,6 @@ async def test_phone_login_returns_without_waiting_for_chat_refresh(
     login_env, password
 ):
     env = login_env
-    await env.lock.acquire()
     telegram._login_sessions["account_+100"] = {
         "client": env.client,
         "lock": env.lock,
@@ -113,7 +113,6 @@ async def test_phone_login_returns_without_waiting_for_chat_refresh(
 @pytest.mark.asyncio
 async def test_phone_invalid_code_cleans_up_without_persisting(login_env):
     env = login_env
-    await env.lock.acquire()
     telegram._login_sessions["account_+100"] = {"client": env.client, "lock": env.lock}
     env.client.sign_in.side_effect = PhoneCodeInvalid
     with pytest.raises(ValueError, match="验证码错误"):

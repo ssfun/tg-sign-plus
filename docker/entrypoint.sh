@@ -17,7 +17,7 @@ KOMARI_SECRET="${KOMARI_SECRET:-}"
 # run komari-agent
 if [ -n "$KOMARI_SERVER" ] && [ -n "$KOMARI_SECRET" ]; then
     echo "INFO: Starting komari agent..."
-    /app/komari-agent -e "$KOMARI_SERVER" -t "$KOMARI_SECRET" --disable-auto-update >>/tmp/komari-agent.log 2>&1 &
+    /app/komari-agent -e "$KOMARI_SERVER" -t "$KOMARI_SECRET" --disable-auto-update &
 else
     echo "INFO: Komari agent skipped (credentials not configured)."
 fi
@@ -42,13 +42,8 @@ if [ "$(id -u)" -eq 0 ]; then
 
     # Repair ownership and write bits for existing historical files.
     # This avoids readonly sqlite and permission denied after image upgrades.
-    for p in /data /data/.signer /data/sessions /data/logs /data/db.sqlite /data/.tg_signpulse_data_dir; do
-      if [ -e "${p}" ]; then
-        chown -R "${TARGET_UID}:${TARGET_GID}" "${p}" 2>/dev/null || true
-        chmod -R u+rwX "${p}" 2>/dev/null || true
-        chmod -R g+rwX "${p}" 2>/dev/null || true
-      fi
-    done
+    chown -R "${TARGET_UID}:${TARGET_GID}" /data 2>/dev/null || true
+    chmod -R u+rwX,g+rwX /data 2>/dev/null || true
   fi
 
 

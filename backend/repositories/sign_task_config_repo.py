@@ -11,6 +11,8 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from backend.services.sign_task_run_summary import compact_run_entry
+
 
 class SignTaskConfigRepo(abc.ABC):
     """SignTask 配置存储抽象基类"""
@@ -69,6 +71,19 @@ class DatabaseSignTaskConfigRepo(SignTaskConfigRepo):
     def _get_db(self):
         return self._session_factory()
 
+    def exists(self, task_name: str, account_name: str) -> bool:
+        from backend.models.sign_task_config import SignTaskConfig
+
+        with self._get_db() as db:
+            return db.query(SignTaskConfig.id).filter_by(task_name=task_name, account_name=account_name).first() is not None
+
+    def get_revision(self, task_name: str, account_name: str) -> str | None:
+        from backend.models.sign_task_config import SignTaskConfig
+
+        with self._get_db() as db:
+            row = db.query(SignTaskConfig.updated_at).filter_by(task_name=task_name, account_name=account_name).first()
+            return row.updated_at.isoformat() if row else None
+
     def list_configs(
         self, account_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -113,6 +128,10 @@ class DatabaseSignTaskConfigRepo(SignTaskConfigRepo):
                 .first()
             )
             payload = dict(config)
+            if "last_run" not in payload and row:
+                payload["last_run"] = json.loads(row.config_json or "{}").get("last_run")
+            if isinstance(payload.get("last_run"), dict):
+                payload["last_run"] = compact_run_entry(payload["last_run"])
             payload.pop("account_name", None)
             sign_at = str(payload.pop("sign_at", "") or "")
             enabled = bool(payload.pop("enabled", True))
@@ -172,7 +191,7 @@ class DatabaseSignTaskConfigRepo(SignTaskConfigRepo):
             if not row:
                 return
             config = json.loads(row.config_json) if row.config_json else {}
-            config["last_run"] = last_run
+            config["last_run"] = compact_run_entry(last_run)
             row.config_json = json.dumps(config, ensure_ascii=False)
             row.updated_at = datetime.utcnow()
             db.commit()
@@ -262,7 +281,7 @@ class DatabaseSignTaskConfigRepo(SignTaskConfigRepo):
             "engine": "event",
             "chats": config.get("chats", []),
             "enabled": row.enabled,
-            "last_run": config.get("last_run"),
+            "last_run": compact_run_entry(config["last_run"]) if isinstance(config.get("last_run"), dict) else None,
             "execution_mode": config.get("execution_mode", "fixed"),
             "range_start": config.get("range_start", ""),
             "range_end": config.get("range_end", ""),

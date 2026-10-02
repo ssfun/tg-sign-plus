@@ -37,6 +37,7 @@ from backend.core.schema_migrator import upgrade_schema  # noqa: E402
 from backend.core.rate_limit import limiter  # noqa: E402
 import backend.models  # noqa: E402,F401
 from backend.scheduler import (  # noqa: E402
+    _job_maintenance,
     init_scheduler,
     shutdown_scheduler,
     sync_jobs,
@@ -197,6 +198,7 @@ async def on_startup() -> None:
 
     async def _post_startup() -> None:
         try:
+            await _job_maintenance()
             await sync_jobs(schedule_range_catchup=True)
             app.state.ready = True
             app.state.startup_error = None
@@ -210,5 +212,8 @@ async def on_startup() -> None:
 
 
 @app.on_event("shutdown")
-def on_shutdown() -> None:
+async def on_shutdown() -> None:
     shutdown_scheduler()
+    from backend.services.telegram import get_telegram_service
+
+    await get_telegram_service().close_pending_logins()

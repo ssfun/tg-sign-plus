@@ -129,15 +129,6 @@ def _parse_scheduled_time(value: str | None) -> datetime | None:
     return parsed
 
 
-def _refresh_tasks_cache() -> None:
-    from backend.services.sign_tasks import get_sign_task_service
-
-    try:
-        get_sign_task_service().list_tasks(force_refresh=True)
-    except Exception:
-        pass
-
-
 def _update_next_scheduled_at(
     task_name: str, account_name: str, next_scheduled_at: datetime | None
 ) -> None:
@@ -145,7 +136,6 @@ def _update_next_scheduled_at(
 
     config_repo = get_sign_task_config_repo()
     config_repo.update_next_scheduled_at(task_name, account_name, next_scheduled_at)
-    _refresh_tasks_cache()
 
 
 def _remove_range_execution_job(account_name: str, task_name: str) -> None:
@@ -429,14 +419,12 @@ def get_scheduler_status(account_name: str | None = None) -> dict[str, object]:
     ]
 
     sign_task_service = get_sign_task_service()
-    sign_tasks = sign_task_service.list_tasks(force_refresh=True)
+    sign_tasks = sign_task_service.list_task_configs()
     if account_name:
         sign_tasks = [
             task for task in sign_tasks if task.get("account_name") == account_name
         ]
-        sign_jobs = [
-            job for job in sign_jobs if job.id.startswith(f"sign-{account_name}-")
-        ]
+        sign_jobs = [job for job in sign_jobs if job.args and job.args[0] == account_name]
 
     sign_task_statuses: list[dict[str, object]] = []
     for st in sign_tasks:
@@ -488,8 +476,25 @@ def get_scheduler_status(account_name: str | None = None) -> dict[str, object]:
 
 
 async def _job_maintenance() -> None:
-    """每日维护任务。"""
-    return None
+    """Keep writes and expiration scans out of history GET requests."""
+    await asyncio.to_thread(_run_maintenance)
+
+
+def _run_maintenance() -> None:
+    from backend.core.config import get_settings
+    from backend.core.database import get_session_local
+    from backend.models.audit_log import AuditLog
+    from backend.models.refresh_token import RefreshToken
+    from backend.services.sign_tasks import get_sign_task_service
+
+    get_sign_task_service().prune_expired_history_logs()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with get_session_local()() as db:
+        db.query(RefreshToken).filter(RefreshToken.expires_at <= now).delete(synchronize_session=False)
+        audit_days = get_settings().audit_log_retention_days
+        if audit_days > 0:
+            db.query(AuditLog).filter(AuditLog.created_at < now - timedelta(days=audit_days)).delete(synchronize_session=False)
+        db.commit()
 
 
 async def sync_jobs(schedule_range_catchup: bool = False) -> None:
@@ -510,7 +515,7 @@ async def sync_jobs(schedule_range_catchup: bool = False) -> None:
     desired_ids = set()
 
     sign_task_service = get_sign_task_service()
-    sign_tasks = sign_task_service.list_tasks(force_refresh=True)
+    sign_tasks = sign_task_service.list_task_configs()
     for st in sign_tasks:
         job_id = _cron_job_id(st["account_name"], st["name"])
         desired_ids.add(job_id)
@@ -572,7 +577,7 @@ async def init_scheduler(sync_on_startup: bool = True) -> AsyncIOScheduler:
 
         scheduler.add_job(
             _job_maintenance,
-            trigger=CronTrigger.from_crontab("0 3 * * *"),
+            trigger=CronTrigger.from_crontab("0 3 * * *", timezone=settings.timezone),
             id="system-maintenance",
             replace_existing=True,
         )

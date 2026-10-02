@@ -8,9 +8,7 @@ from backend.services.sign_task_event_presets import (
     validate_writable_event_task_config,
 )
 from backend.services.sign_task_run_summary import (
-    build_flow_event_counts,
-    build_run_summary,
-    sanitize_public_run_summary,
+    compact_run_entry,
 )
 
 
@@ -19,14 +17,6 @@ class SignTaskManagementService:
         self._config_repo = config_repo
         self._get_now = get_now
         self._append_scheduler_log = append_scheduler_log
-        self._tasks_cache_ref = None
-
-    def bind_tasks_cache(self, tasks_cache_ref):
-        self._tasks_cache_ref = tasks_cache_ref
-
-    def _invalidate_tasks_cache(self) -> None:
-        if self._tasks_cache_ref is not None:
-            self._tasks_cache_ref["value"] = None
 
     def _normalize_loaded_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(task, dict):
@@ -46,8 +36,6 @@ class SignTaskManagementService:
                     task_name,
                     exc_info=True,
                 )
-            else:
-                self._invalidate_tasks_cache()
         return normalized
 
     @staticmethod
@@ -84,65 +72,23 @@ class SignTaskManagementService:
     @staticmethod
     def _normalize_cached_last_run(task: Dict[str, Any]) -> None:
         last_run = task.get("last_run")
-        if last_run is None:
-            return
-        if not isinstance(last_run, dict):
+        if isinstance(last_run, dict):
+            task["last_run"] = compact_run_entry(last_run)
+        else:
             task.pop("last_run", None)
-            return
 
-        flow_items = last_run.get("flow_items")
-        if not isinstance(flow_items, list):
-            flow_items = []
-        flow_items = [item for item in flow_items if isinstance(item, dict)]
-
-        run_summary = sanitize_public_run_summary(last_run.get("run_summary"))
-        if not run_summary:
-            run_summary = build_run_summary(
-                flow_items,
-                success=bool(last_run.get("success", False)),
-                error="" if bool(last_run.get("success", False)) else str(last_run.get("message", "") or ""),
-            )
-
-        normalized = dict(last_run)
-        normalized["success"] = bool(last_run.get("success", False))
-        normalized["message"] = str(last_run.get("message", "") or "")
-        normalized["run_summary"] = run_summary
-        if "flow_event_counts" not in normalized:
-            normalized["flow_event_counts"] = build_flow_event_counts(flow_items)
-        task["last_run"] = normalized
-
-    def list_tasks(self, get_last_run_info, account_name: Optional[str] = None, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        cache = self._tasks_cache_ref["value"] if self._tasks_cache_ref is not None else None
-        if cache is not None and not force_refresh:
-            normalized_cache = [
-                self._attach_last_run(
-                    self._normalize_loaded_task(task),
-                    get_last_run_info,
-                )
-                for task in cache
-            ]
-            if self._tasks_cache_ref is not None:
-                self._tasks_cache_ref["value"] = normalized_cache
-            if account_name:
-                return [t for t in normalized_cache if t.get("account_name") == account_name]
-            return normalized_cache
-
-        try:
-            tasks = self._config_repo.list_configs(account_name=None)
-            tasks = [
-                self._attach_last_run(
-                    self._normalize_loaded_task(task),
-                    get_last_run_info,
-                )
-                for task in tasks
-            ]
-            if self._tasks_cache_ref is not None:
-                self._tasks_cache_ref["value"] = tasks
-            if account_name:
-                return [t for t in tasks if t.get("account_name") == account_name]
-            return tasks
-        except Exception:
+    def list_tasks(self, get_last_run_infos, account_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        tasks = [self._normalize_loaded_task(task) for task in self._config_repo.list_configs(account_name)]
+        if not tasks:
             return []
+        summaries = get_last_run_infos(account_name)
+        for task in tasks:
+            latest = summaries.get((task.get("account_name", ""), task["name"]))
+            if latest:
+                task["last_run"] = latest
+            else:
+                self._normalize_cached_last_run(task)
+        return tasks
 
     def get_task(
         self,
@@ -206,7 +152,6 @@ class SignTaskManagementService:
 
         self._config_repo.save_config(task_name, account_name, config)
         self._config_repo.update_next_scheduled_at(task_name, account_name, None)
-        self._invalidate_tasks_cache()
 
         try:
             from backend.scheduler import add_or_update_sign_task_job
@@ -283,7 +228,6 @@ class SignTaskManagementService:
 
         self._config_repo.save_config(task_name, acc_name, config)
         self._config_repo.update_next_scheduled_at(task_name, acc_name, None)
-        self._invalidate_tasks_cache()
 
         try:
             from backend.scheduler import add_or_update_sign_task_job
@@ -338,7 +282,6 @@ class SignTaskManagementService:
         self._config_repo.set_enabled(task_name, account_name, enabled)
         if not enabled:
             self._config_repo.update_next_scheduled_at(task_name, account_name, None)
-        self._invalidate_tasks_cache()
 
         task = self.get_task(task_name, account_name)
         if task is None:
@@ -361,7 +304,6 @@ class SignTaskManagementService:
         if not deleted:
             return False
 
-        self._invalidate_tasks_cache()
 
         try:
             from backend.scheduler import remove_sign_task_job

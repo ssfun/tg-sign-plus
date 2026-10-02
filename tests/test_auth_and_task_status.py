@@ -44,7 +44,7 @@ def panel():
             yield db
     calls = []
     service = SimpleNamespace(
-        get_task=lambda task, account: {"name": task} if (task, account) == ("sign", "test-account") else None,
+        task_exists=lambda task, account: {"name": task} if (task, account) == ("sign", "test-account") else None,
         is_task_running=lambda task, account_name: calls.append((task, account_name)) or True,
     )
     app.dependency_overrides[get_db] = session

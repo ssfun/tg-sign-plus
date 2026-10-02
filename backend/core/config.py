@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     refresh_cookie_path: str = "/api"
     cors_allow_origin_regex: str = r"https?://(localhost|127\.0\.0\.1)(:\d+)?$"
     allow_password_totp_reset: bool = False
+    audit_log_retention_days: int = Field(0, ge=0)
 
     timezone: str = Field(default_factory=get_default_timezone)
     data_dir: Path = Field(default_factory=get_initial_data_dir)

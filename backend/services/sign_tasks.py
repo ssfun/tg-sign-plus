@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 from typing import Any, Dict, List, Optional
 
@@ -47,7 +48,6 @@ class SignTaskService:
         self._active_tasks: Dict[tuple[str, str], bool] = {}  # (account, task) -> running
         self._starting_tasks: set[tuple[str, str]] = set()
         self._cleanup_tasks: Dict[tuple[str, str], asyncio.Task] = {}
-        self._tasks_cache_ref = {"value": None}
         self._account_locks: Dict[str, asyncio.Lock] = {}  # 账号锁
         self._account_last_run_end: Dict[str, float] = {}  # 账号最后一次结束时间
         self._account_cooldown_seconds = int(
@@ -74,7 +74,6 @@ class SignTaskService:
             get_now=self._now,
             append_scheduler_log=self._append_scheduler_log,
         )
-        self._management_service.bind_tasks_cache(self._tasks_cache_ref)
         self._chat_cache_service = None
         self._executor = None
 
@@ -111,21 +110,19 @@ class SignTaskService:
     def get_task_history_logs(
         self, task_name: str, account_name: str, limit: int = 20
     ) -> List[Dict[str, Any]]:
-        self._history_service.bind_tasks_cache(self._tasks_cache_ref["value"])
         return self._history_service.get_task_history_logs(
             task_name=task_name,
             account_name=account_name,
             limit=limit,
         )
 
-    def get_account_history_logs(self, account_name: str) -> List[Dict[str, Any]]:
+    def get_account_history_logs(self, account_name: str, limit: int | None = None) -> List[Dict[str, Any]]:
         """获取某账号下所有任务的最近历史日志"""
-        return self._history_service.get_account_history_logs(account_name)
+        return self._history_service.get_account_history_logs(account_name, limit=limit)
 
     def clear_account_history_logs(self, account_name: str) -> Dict[str, int]:
         """清理某账号的历史日志，不影响其他账号"""
         tasks = self.list_tasks(account_name=account_name)
-        self._history_service.bind_tasks_cache(self._tasks_cache_ref["value"])
         return self._history_service.clear_account_history_logs(account_name, tasks)
 
     def _get_last_run_info_by_name(
@@ -145,7 +142,6 @@ class SignTaskService:
         run_summary: Optional[Dict[str, Any]] = None,
     ):
         """保存任务执行历史"""
-        self._history_service.bind_tasks_cache(self._tasks_cache_ref["value"])
         self._history_service.save_run_info(
             task_name=task_name,
             success=success,
@@ -164,25 +160,37 @@ class SignTaskService:
             logs_dir = settings.resolve_logs_dir()
             logs_dir.mkdir(parents=True, exist_ok=True)
             log_path = logs_dir / filename
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(f'{message}\n')
+            log = logging.getLogger(f"backend.scheduler.file.{filename}")
+            if not log.handlers:
+                log.addHandler(RotatingFileHandler(log_path, maxBytes=3 * 1024 * 1024, backupCount=3, encoding="utf-8"))
+                log.setLevel(logging.INFO)
+                log.propagate = False
+            log.info(message)
         except Exception as e:
             logging.getLogger('backend.sign_tasks').warning(
                 'Failed to write scheduler log %s: %s', filename, e
             )
 
-    def invalidate_tasks_cache(self) -> None:
-        """Invalidate cached task list after out-of-band config changes."""
-        self._tasks_cache_ref["value"] = None
-
-    def list_tasks(
-        self, account_name: Optional[str] = None, force_refresh: bool = False
-    ) -> List[Dict[str, Any]]:
+    def list_tasks(self, account_name: Optional[str] = None) -> List[Dict[str, Any]]:
         return self._management_service.list_tasks(
-            self._get_last_run_info_by_name,
-            account_name=account_name,
-            force_refresh=force_refresh,
+            self._history_repo.get_latest_summaries, account_name=account_name,
         )
+
+    def list_task_configs(self, account_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        return self._config_repo.list_configs(account_name)
+
+    def task_exists(self, task_name: str, account_name: str) -> bool:
+        return self._config_repo.exists(task_name, account_name)
+
+    def get_history_state(self, task_name: str, account_name: str) -> Dict[str, Any] | None:
+        revision = self._config_repo.get_revision(task_name, account_name)
+        if revision is None:
+            return None
+        marker = self._history_repo.get_history_marker(task_name, account_name, self._history_service.retention_cutoff())
+        return {"revision": f"{revision}:{marker}", "running": self.is_task_running(task_name, account_name=account_name)}
+
+    def prune_expired_history_logs(self) -> Dict[str, int]:
+        return self._history_service.prune_expired_history_logs()
 
     def get_task(
         self, task_name: str, account_name: Optional[str] = None

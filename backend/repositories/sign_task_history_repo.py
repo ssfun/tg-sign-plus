@@ -12,13 +12,16 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
+from backend.services.sign_task_run_summary import compact_run_entry
+
 
 class SignTaskHistoryRepo(abc.ABC):
     """SignTask 运行历史存储抽象基类"""
 
     @abc.abstractmethod
     def load_entries(
-        self, task_name: str, account_name: str = ""
+        self, task_name: str, account_name: str = "", *, limit: int | None = None,
+        cutoff: datetime | None = None,
     ) -> List[Dict[str, Any]]:
         ...
 
@@ -39,7 +42,7 @@ class SignTaskHistoryRepo(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def get_account_history(self, account_name: str) -> List[Dict[str, Any]]:
+    def get_account_history(self, account_name: str, *, limit: int | None = None, cutoff: datetime | None = None) -> List[Dict[str, Any]]:
         ...
 
     @abc.abstractmethod
@@ -60,7 +63,8 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
         return self._session_factory()
 
     def load_entries(
-        self, task_name: str, account_name: str = ""
+        self, task_name: str, account_name: str = "", *, limit: int | None = None,
+        cutoff: datetime | None = None,
     ) -> List[Dict[str, Any]]:
         from backend.models.sign_task_run import SignTaskRun
 
@@ -69,7 +73,12 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
             q = db.query(SignTaskRun).filter_by(task_name=task_name)
             if account_name:
                 q = q.filter_by(account_name=account_name)
-            rows = q.order_by(SignTaskRun.created_at.desc()).all()
+            if cutoff is not None:
+                q = q.filter(SignTaskRun.created_at >= self._utc_cutoff(cutoff))
+            q = q.order_by(SignTaskRun.created_at.desc(), SignTaskRun.id.desc())
+            if limit is not None:
+                q = q.limit(limit)
+            rows = q.all()
             return [self._row_to_dict(r) for r in rows]
         finally:
             db.close()
@@ -91,18 +100,6 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
                 stored_flow_items = [item for item in flow_items if isinstance(item, dict)]
             else:
                 stored_flow_items = []
-            run_summary = entry.get("run_summary")
-            if isinstance(run_summary, dict) and run_summary:
-                stored_flow_items.append(
-                    {
-                        "ts": entry.get("time", ""),
-                        "level": "info",
-                        "stage": "result",
-                        "event": "run_summary",
-                        "text": "结构化运行摘要",
-                        "meta": run_summary,
-                    }
-                )
             row = SignTaskRun(
                 account_name=account_name,
                 task_name=task_name,
@@ -110,27 +107,23 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
                 message=entry.get("message", ""),
                 flow_logs=json.dumps(flow_logs, ensure_ascii=False) if flow_logs else None,
                 flow_items=json.dumps(stored_flow_items, ensure_ascii=False) if stored_flow_items else None,
+                summary_json=json.dumps(compact_run_entry(entry), ensure_ascii=False),
                 flow_truncated=entry.get("flow_truncated", False),
                 flow_line_count=entry.get("flow_line_count", 0),
             )
             db.add(row)
             db.flush()
 
-            count = (
-                db.query(SignTaskRun)
+            # Prune IDs in SQL without materializing obsolete diagnostic bodies.
+            old_ids = (
+                db.query(SignTaskRun.id)
                 .filter_by(account_name=account_name, task_name=task_name)
-                .count()
+                .order_by(SignTaskRun.created_at.desc(), SignTaskRun.id.desc())
+                .offset(max_entries)
+                .subquery()
             )
-            if count > max_entries:
-                oldest = (
-                    db.query(SignTaskRun)
-                    .filter_by(account_name=account_name, task_name=task_name)
-                    .order_by(SignTaskRun.created_at.asc())
-                    .limit(count - max_entries)
-                    .all()
-                )
-                for old in oldest:
-                    db.delete(old)
+            from sqlalchemy import select
+            db.query(SignTaskRun).filter(SignTaskRun.id.in_(select(old_ids.c.id))).delete(synchronize_session=False)
 
             db.commit()
         except Exception:
@@ -149,22 +142,26 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
             q = db.query(SignTaskRun).filter_by(task_name=task_name)
             if account_name:
                 q = q.filter_by(account_name=account_name)
-            row = q.order_by(SignTaskRun.created_at.desc()).first()
+            row = q.order_by(SignTaskRun.created_at.desc(), SignTaskRun.id.desc()).first()
             return self._row_to_dict(row) if row else None
         finally:
             db.close()
 
-    def get_account_history(self, account_name: str) -> List[Dict[str, Any]]:
+    def get_account_history(self, account_name: str, *, limit: int | None = None, cutoff: datetime | None = None) -> List[Dict[str, Any]]:
         from backend.models.sign_task_run import SignTaskRun
 
         db = self._get_db()
         try:
-            rows = (
+            query = (
                 db.query(SignTaskRun)
                 .filter_by(account_name=account_name)
-                .order_by(SignTaskRun.created_at.desc())
-                .all()
+                .order_by(SignTaskRun.created_at.desc(), SignTaskRun.id.desc())
             )
+            if cutoff is not None:
+                query = query.filter(SignTaskRun.created_at >= self._utc_cutoff(cutoff))
+            if limit is not None:
+                query = query.limit(limit)
+            rows = query.all()
             result = []
             for r in rows:
                 d = self._row_to_dict(r)
@@ -191,8 +188,7 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
     def prune_older_than(self, cutoff: datetime) -> Dict[str, int]:
         from backend.models.sign_task_run import SignTaskRun
 
-        if cutoff.tzinfo is not None:
-            cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+        cutoff = self._utc_cutoff(cutoff)
 
         db = self._get_db()
         try:
@@ -206,9 +202,69 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
             db.close()
 
     @staticmethod
-    def _row_to_dict(row) -> Dict[str, Any]:
-        from backend.core.config import get_settings
+    def _utc_cutoff(cutoff: datetime) -> datetime:
+        return cutoff.astimezone(timezone.utc).replace(tzinfo=None) if cutoff.tzinfo else cutoff
 
+    @staticmethod
+    def _summary_columns():
+        from sqlalchemy import case
+        from backend.models.sign_task_run import SignTaskRun as Run
+
+        # Legacy rows have no summary column. Fetch their bodies in this same
+        # query, never one lazy-load query per task. New rows read only metadata.
+        return (
+            Run.account_name, Run.task_name, Run.created_at, Run.success, Run.message,
+            Run.summary_json, Run.flow_truncated, Run.flow_line_count,
+            case((Run.summary_json.is_(None), Run.flow_items), else_=None).label("flow_items"),
+            case((Run.summary_json.is_(None), Run.flow_logs), else_=None).label("flow_logs"),
+        )
+
+    @classmethod
+    def _row_to_summary(cls, row):
+        if row.summary_json:
+            summary = json.loads(row.summary_json)
+            summary.update(time=cls._format_time(row.created_at), success=row.success, message=row.message or "")
+            return compact_run_entry(summary)
+        return compact_run_entry(cls._row_to_dict(row))
+
+    def get_latest_summary(self, task_name: str, account_name: str = "") -> Optional[Dict[str, Any]]:
+        from backend.models.sign_task_run import SignTaskRun as Run
+
+        with self._get_db() as db:
+            q = db.query(*self._summary_columns()).filter(Run.task_name == task_name)
+            if account_name:
+                q = q.filter(Run.account_name == account_name)
+            row = q.order_by(Run.created_at.desc(), Run.id.desc()).first()
+            return self._row_to_summary(row) if row else None
+
+    def get_latest_summaries(self, account_name: str | None = None) -> Dict[tuple[str, str], Dict[str, Any]]:
+        from sqlalchemy import func
+        from backend.models.sign_task_run import SignTaskRun as Run
+
+        with self._get_db() as db:
+            ranked = db.query(Run.id, func.row_number().over(
+                partition_by=(Run.account_name, Run.task_name),
+                order_by=(Run.created_at.desc(), Run.id.desc()),
+            ).label("position"))
+            if account_name:
+                ranked = ranked.filter(Run.account_name == account_name)
+            ranked = ranked.subquery()
+            rows = db.query(*self._summary_columns()).join(ranked, Run.id == ranked.c.id).filter(ranked.c.position == 1).all()
+            return {(r.account_name, r.task_name): self._row_to_summary(r) for r in rows}
+
+    def get_history_marker(self, task_name: str, account_name: str, cutoff: datetime | None = None) -> str:
+        from sqlalchemy import func
+        from backend.models.sign_task_run import SignTaskRun as Run
+
+        with self._get_db() as db:
+            q = db.query(func.max(Run.id), func.count(Run.id)).filter_by(task_name=task_name, account_name=account_name)
+            if cutoff is not None:
+                q = q.filter(Run.created_at >= self._utc_cutoff(cutoff))
+            latest, count = q.one()
+            return f"{latest or 0}:{count}"
+
+    @staticmethod
+    def _row_to_dict(row) -> Dict[str, Any]:
         flow_logs = []
         if row.flow_logs:
             try:
@@ -223,22 +279,12 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
             except Exception:
                 pass
 
-        created_at = row.created_at
-        if created_at:
-            try:
-                tz = ZoneInfo(get_settings().timezone)
-            except Exception:
-                tz = timezone.utc
-            if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=timezone.utc)
-            created_at_str = created_at.astimezone(tz).isoformat()
-        else:
-            created_at_str = ""
-
         run_summary, public_flow_items = DatabaseSignTaskHistoryRepo._split_run_summary(flow_items)
+        if getattr(row, "summary_json", None):
+            run_summary = json.loads(row.summary_json).get("run_summary") or run_summary
 
         return {
-            "time": created_at_str,
+            "time": DatabaseSignTaskHistoryRepo._format_time(row.created_at),
             "success": row.success,
             "message": row.message or "",
             "account_name": row.account_name,
@@ -248,6 +294,20 @@ class DatabaseSignTaskHistoryRepo(SignTaskHistoryRepo):
             "flow_truncated": row.flow_truncated,
             "flow_line_count": row.flow_line_count,
         }
+
+    @staticmethod
+    def _format_time(created_at) -> str:
+        from backend.core.config import get_settings
+
+        if created_at:
+            try:
+                tz = ZoneInfo(get_settings().timezone)
+            except Exception:
+                tz = timezone.utc
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            return created_at.astimezone(tz).isoformat()
+        return ""
 
     @staticmethod
     def _extract_run_summary(flow_items: List[Dict[str, Any]]) -> Dict[str, Any]:

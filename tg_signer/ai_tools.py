@@ -154,6 +154,10 @@ class AITools:
         self.default_model = cfg.get("model") or DEFAULT_MODEL
         self.request_timeout = _read_float_env("TG_AI_REQUEST_TIMEOUT", 45.0, minimum=1.0)
 
+    async def close(self):
+        if self.client is not None:
+            await self.client.close()
+
     async def _completion(self, client: "AsyncOpenAI", **kwargs):
         return await asyncio.wait_for(
             client.chat.completions.create(**kwargs),

@@ -24,14 +24,6 @@ def _mask_secret(value: str | None) -> str | None:
     return f"{value[:4]}{'*' * (len(value) - 8)}{value[-4:]}"
 
 
-def _invalidate_sign_task_cache(service: SignTaskService) -> None:
-    try:
-        service.invalidate_tasks_cache()
-    except Exception:
-        # Best-effort cache invalidation; import should still succeed.
-        pass
-
-
 class ExportTaskResponse(BaseModel):
     task_name: str
     task_type: str
@@ -135,7 +127,6 @@ async def import_sign_task(
 
         from backend.scheduler import sync_jobs
 
-        _invalidate_sign_task_cache(sign_task_service)
         await sync_jobs()
 
         return ImportTaskResponse(
@@ -193,7 +184,6 @@ async def import_all_configs(
 
         from backend.scheduler import sync_jobs
 
-        _invalidate_sign_task_cache(sign_task_service)
         await sync_jobs()
 
         return ImportAllResponse(
@@ -228,7 +218,6 @@ async def delete_sign_task(
 
         from backend.scheduler import sync_jobs
 
-        _invalidate_sign_task_cache(sign_task_service)
         await sync_jobs()
 
         return {"success": True, "message": f"Task {task_name} deleted"}

@@ -238,6 +238,7 @@ class BaseUserWorker(Generic[ConfigT]):
         self.loop = self.app.loop
         self.user: Optional[User] = None
         self._config = None
+        self._ai_tools: Optional[AITools] = None
         self._chat_cache_loader = chat_cache_loader
         self.context = self.ensure_ctx()
 
@@ -577,7 +578,17 @@ class BaseUserWorker(Generic[ConfigT]):
         return cfg
 
     def get_ai_tools(self):
-        return AITools(self.ensure_ai_cfg())
+        if self._ai_tools is None:
+            self._ai_tools = AITools(self.ensure_ai_cfg())
+        return self._ai_tools
+
+    async def close_ai_tools(self):
+        tools, self._ai_tools = self._ai_tools, None
+        if tools is not None:
+            try:
+                await asyncio.wait_for(tools.close(), timeout=5)
+            except Exception:
+                logger.warning("Failed to close AI client", exc_info=True)
 
 
 class Waiter:
@@ -1006,13 +1017,16 @@ class UserSigner(BaseUserWorker[SignConfigV3]):
     async def run(
         self, num_of_dialogs=20, only_once: bool = False, force_rerun: bool = False
     ):
-        if self.app.in_memory or self.app.session_string:
-            return await self.in_memory_run(
+        try:
+            if self.app.in_memory or self.app.session_string:
+                return await self.in_memory_run(
+                    num_of_dialogs, only_once=only_once, force_rerun=force_rerun
+                )
+            return await self.normal_run(
                 num_of_dialogs, only_once=only_once, force_rerun=force_rerun
             )
-        return await self.normal_run(
-            num_of_dialogs, only_once=only_once, force_rerun=force_rerun
-        )
+        finally:
+            await self.close_ai_tools()
 
     async def in_memory_run(
         self, num_of_dialogs=20, only_once: bool = False, force_rerun: bool = False
@@ -1097,7 +1111,10 @@ class UserSigner(BaseUserWorker[SignConfigV3]):
                             if delay > 0:
                                 self.log(f"单次执行随机延迟: {delay} 秒")
                                 await asyncio.sleep(delay)
-                        await sign_once()
+                        try:
+                            await sign_once()
+                        finally:
+                            await self.close_ai_tools()
 
             except (OSError, errors.Unauthorized) as e:
                 logger.exception(e)
@@ -1512,7 +1529,10 @@ class UserMonitor(BaseUserWorker[MonitorConfig]):
         )
         async with self.app:
             self.log("开始监控...")
-            await idle()
+            try:
+                await idle()
+            finally:
+                await self.close_ai_tools()
 
 
 class _UDPProtocol(asyncio.DatagramProtocol):

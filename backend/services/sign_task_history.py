@@ -11,6 +11,7 @@ from backend.services.sign_task_event_presets import normalize_event_task_config
 from backend.services.sign_task_run_summary import (
     build_flow_event_counts,
     build_run_summary,
+    compact_run_entry,
     sanitize_public_run_summary,
 )
 
@@ -32,10 +33,6 @@ class SignTaskHistoryService:
         self._history_max_entries = history_max_entries
         self._history_max_flow_lines = history_max_flow_lines
         self._history_max_line_chars = history_max_line_chars
-        self._tasks_cache_ref: Optional[list] = None
-
-    def bind_tasks_cache(self, tasks_cache_ref: Optional[list]) -> None:
-        self._tasks_cache_ref = tasks_cache_ref
 
     @staticmethod
     def _get_timezone() -> ZoneInfo:
@@ -125,18 +122,18 @@ class SignTaskHistoryService:
         except (TypeError, ValueError):
             return 7
 
-    def prune_expired_history_logs(self) -> Dict[str, int]:
-        retention_days = self._get_log_retention_days()
-        if retention_days <= 0:
-            return {"removed_entries": 0}
+    def retention_cutoff(self) -> datetime | None:
+        days = self._get_log_retention_days()
+        return self._now() - timedelta(days=days) if days > 0 else None
 
-        cutoff = self._now() - timedelta(days=retention_days)
-        return self._history_repo.prune_older_than(cutoff)
+    def prune_expired_history_logs(self) -> Dict[str, int]:
+        cutoff = self.retention_cutoff()
+        return self._history_repo.prune_older_than(cutoff) if cutoff else {"removed_entries": 0}
 
     def load_history_entries(
-        self, task_name: str, account_name: str = ""
+        self, task_name: str, account_name: str = "", *, limit: int | None = None
     ) -> List[Dict[str, Any]]:
-        return self._history_repo.load_entries(task_name, account_name)
+        return self._history_repo.load_entries(task_name, account_name, limit=limit, cutoff=self.retention_cutoff())
 
     def get_task_history_logs(
         self, task_name: str, account_name: str, limit: int = 20
@@ -146,11 +143,10 @@ class SignTaskHistoryService:
         if limit > 200:
             limit = 200
 
-        self.prune_expired_history_logs()
-        history = self.load_history_entries(task_name, account_name=account_name)
+        history = self.load_history_entries(task_name, account_name=account_name, limit=limit)
         result: List[Dict[str, Any]] = []
         task_config = self._find_task_config(task_name, account_name)
-        for item in history[:limit]:
+        for item in history:
             result.append(
                 self._normalize_run_entry(
                     item,
@@ -207,22 +203,6 @@ class SignTaskHistoryService:
             except Exception:
                 return config
 
-        tasks = self._tasks_cache_ref or []
-        for task in tasks:
-            if not isinstance(task, dict):
-                continue
-            if task.get("name") != task_name:
-                continue
-            if account_name and task.get("account_name") != account_name:
-                continue
-            config = task.get("config")
-            if isinstance(config, dict):
-                return normalize(config)
-            if isinstance(task.get("chats"), list):
-                return normalize({
-                    "engine": task.get("engine", "event"),
-                    "chats": task.get("chats") or [],
-                })
         get_config = getattr(self._config_repo, "get_config", None)
         if callable(get_config):
             task = get_config(task_name, account_name)
@@ -233,9 +213,8 @@ class SignTaskHistoryService:
                 })
         return None
 
-    def get_account_history_logs(self, account_name: str) -> List[Dict[str, Any]]:
-        self.prune_expired_history_logs()
-        history = self._history_repo.get_account_history(account_name)
+    def get_account_history_logs(self, account_name: str, limit: int | None = None) -> List[Dict[str, Any]]:
+        history = self._history_repo.get_account_history(account_name, limit=limit, cutoff=self.retention_cutoff())
         result: List[Dict[str, Any]] = []
         for item in history:
             if not isinstance(item, dict):
@@ -252,19 +231,14 @@ class SignTaskHistoryService:
             if not task_name:
                 continue
             self._config_repo.clear_last_run(task_name, account_name)
-            if self._tasks_cache_ref is not None:
-                for cache_task in self._tasks_cache_ref:
-                    if cache_task["name"] == task_name and cache_task.get("account_name") == account_name:
-                        cache_task.pop("last_run", None)
-                        break
 
         return self._history_repo.clear_account_history(account_name)
 
     def get_last_run_info(self, task_name: str, account_name: str = "") -> Optional[Dict[str, Any]]:
-        entry = self._history_repo.get_latest(task_name, account_name)
+        entry = self._history_repo.get_latest_summary(task_name, account_name)
         if not isinstance(entry, dict):
             return None
-        return self._normalize_run_entry(entry)
+        return compact_run_entry(entry)
 
     def save_run_info(
         self,
@@ -299,17 +273,10 @@ class SignTaskHistoryService:
             "run_summary": normalized_summary,
         }
 
-        self.prune_expired_history_logs()
         self._history_repo.save_entry(
             task_name,
             account_name,
             new_entry,
             max_entries=self._history_max_entries,
         )
-        self._config_repo.update_last_run(task_name, account_name, new_entry)
-
-        if self._tasks_cache_ref is not None:
-            for cache_task in self._tasks_cache_ref:
-                if cache_task["name"] == task_name and cache_task.get("account_name") == account_name:
-                    cache_task["last_run"] = new_entry
-                    break
+        self._config_repo.update_last_run(task_name, account_name, compact_run_entry(new_entry))

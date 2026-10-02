@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ensureAccessToken, logout } from "../../../lib/auth";
-import { listSignTasks, deleteSignTask, runSignTask, getSignTaskHistory, getAccountChats, refreshAccountChats, searchAccountChats, createSignTask, updateSignTask, setSignTaskEnabled, exportSignTask, importSignTask, getSchedulerStatus, SignTask, SignTaskChat, SignTaskHistoryItem, ChatInfo, CreateSignTaskRequest, SchedulerStatus } from "../../../lib/api";
+import { listSignTasks, deleteSignTask, runSignTask, getSignTaskHistory, getSignTaskHistoryState, getAccountChats, refreshAccountChats, searchAccountChats, createSignTask, updateSignTask, setSignTaskEnabled, exportSignTask, importSignTask, getSchedulerStatus, SignTask, SignTaskChat, SignTaskHistoryItem, ChatInfo, CreateSignTaskRequest, SchedulerStatus } from "../../../lib/api";
 import { Plus, Trash, Spinner, ArrowClockwise, ListDashes, DotsThreeVertical, Robot, MathOperations, Copy, ClipboardText, Lightning, CaretLeft, Gear, SignOut } from "@phosphor-icons/react";
 import { ToastContainer, useToast } from "../../../components/ui/toast";
 import { PageLoading } from "../../../components/ui/page-loading";
@@ -424,17 +424,56 @@ export default function AccountTasksContent() {
     useEffect(() => {
         if (!token || !historyTaskName) return;
         let stopped = false;
+        let inFlight = false;
+        let resumeRequested = false;
+        let revision: string | null = null;
+        let controller: AbortController | undefined;
         let timer: ReturnType<typeof setTimeout>;
         const refresh = async () => {
+            if (stopped || document.hidden || inFlight) return;
+            inFlight = true;
+            resumeRequested = false;
+            controller = new AbortController();
+            const current = controller;
+            const deadline = setTimeout(() => current.abort(), 10000);
+            let delay = 15000;
             try {
-                const logs = await getSignTaskHistory(historyTaskName, accountName, 30);
-                if (!stopped) setHistoryLogs(logs);
-            } catch { /* Keep existing history while offline. */ }
-            if (!stopped) timer = setTimeout(refresh, 5000);
+                const state = await getSignTaskHistoryState(historyTaskName, accountName, current.signal);
+                if (stopped || current.signal.aborted) return;
+                delay = state.running ? 5000 : 15000;
+                if (revision !== state.revision) {
+                    const logs = await getSignTaskHistory(historyTaskName, accountName, 30, current.signal);
+                    if (stopped || current.signal.aborted) return;
+                    setHistoryLogs(logs);
+                    revision = state.revision;
+                }
+            } catch (err: any) {
+                if (!stopped && !current.signal.aborted && revision === null) {
+                    addToastRef.current?.(formatErrorMessage("logs_fetch_failed", err), "error");
+                }
+            } finally {
+                clearTimeout(deadline);
+                inFlight = false;
+                if (!stopped) {
+                    setHistoryLoading(false);
+                    if (!document.hidden) timer = setTimeout(refresh, resumeRequested ? 0 : delay);
+                }
+            }
         };
-        timer = setTimeout(refresh, 5000);
-        return () => { stopped = true; clearTimeout(timer); };
-    }, [token, historyTaskName, accountName]);
+        const onVisibility = () => {
+            clearTimeout(timer);
+            if (document.hidden) controller?.abort();
+            else { resumeRequested = true; void refresh(); }
+        };
+        document.addEventListener("visibilitychange", onVisibility);
+        void refresh();
+        return () => {
+            stopped = true;
+            controller?.abort();
+            clearTimeout(timer);
+            document.removeEventListener("visibilitychange", onVisibility);
+        };
+    }, [token, historyTaskName, accountName, liveMonitorTaskName, formatErrorMessage]);
 
     const monitorUnavailable = useTaskMonitor(accountName, liveMonitorTaskName, async () => {
         const taskName = liveMonitorTaskName;
@@ -561,7 +600,7 @@ export default function AccountTasksContent() {
         }
     };
 
-    const handleShowTaskHistory = async (task: SignTask) => {
+    const handleShowTaskHistory = (task: SignTask) => {
         if (!token) return;
         setHistoryTaskName(task.name);
         setHistoryLogs([]);
@@ -570,14 +609,6 @@ export default function AccountTasksContent() {
         setHistoryFailureOnly(false);
         setHistoryExpandDetails(false);
         setHistoryLoading(true);
-        try {
-            const logs = await getSignTaskHistory(task.name, accountName, 30);
-            setHistoryLogs(logs);
-        } catch (err: any) {
-            addToast(formatErrorMessage("logs_fetch_failed", err), "error");
-        } finally {
-            setHistoryLoading(false);
-        }
     };
 
 

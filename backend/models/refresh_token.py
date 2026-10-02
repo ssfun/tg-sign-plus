@@ -13,7 +13,7 @@ class RefreshToken(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     token_hash = Column(String(255), unique=True, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
     revoked_at = Column(DateTime, nullable=True)
     replaced_by_token_hash = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

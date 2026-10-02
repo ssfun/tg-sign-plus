@@ -8,6 +8,7 @@ import {
   listAccounts,
   checkAccountsStatus,
   startAccountLogin,
+  cancelAccountLogin,
   startQrLogin,
   getQrLoginStatus,
   cancelQrLogin,
@@ -82,6 +83,16 @@ export default function Dashboard() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [loginData, setLoginData] = useState({ ...EMPTY_LOGIN_DATA });
   const [reloginAccountName, setReloginAccountName] = useState<string | null>(null);
+  const loginEpochRef = useRef(0);
+  const phoneSessionRef = useRef<{ account_name: string; phone_number: string; phone_code_hash: string } | null>(null);
+  const abandonPhoneLogin = useCallback(() => {
+    loginEpochRef.current += 1;
+    const pending = phoneSessionRef.current;
+    phoneSessionRef.current = null;
+    if (pending) void cancelAccountLogin(pending).catch(() => { /* Server TTL also releases abandoned sessions. */ });
+  }, []);
+  useEffect(() => abandonPhoneLogin, [abandonPhoneLogin]);
+
   const [loginMode, setLoginMode] = useState<"phone" | "qr">("phone");
   const [qrLogin, setQrLogin] = useState<{
     login_id: string;
@@ -102,9 +113,9 @@ export default function Dashboard() {
   const qrPasswordRef = useRef("");
   const qrPasswordLoadingRef = useRef(false);
 
-  const qrPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const qrPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const qrPollControllerRef = useRef<AbortController | null>(null);
   const qrCountdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const qrPollDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qrActiveLoginIdRef = useRef<string | null>(null);
   const qrPollSeqRef = useRef(0);
   const qrToastShownRef = useRef<Record<string, { expired?: boolean; error?: boolean }>>({});
@@ -401,6 +412,8 @@ export default function Dashboard() {
   };
 
   const openAddDialog = () => {
+    abandonPhoneLogin();
+    setLoading(false);
     setReloginAccountName(null);
     setLoginMode("phone");
     setLoginData({ ...EMPTY_LOGIN_DATA });
@@ -424,6 +437,8 @@ export default function Dashboard() {
       addToast(t("account_name_duplicate"), "error");
       return;
     }
+    abandonPhoneLogin();
+    const epoch = loginEpochRef.current;
     try {
       setLoading(true);
       const res = await startAccountLogin({
@@ -432,12 +447,19 @@ export default function Dashboard() {
         proxy: loginData.proxy || undefined,
         chat_cache_ttl_minutes: parseChatCacheTtlMinutes(loginData.chat_cache_ttl_minutes),
       });
-      setLoginData({ ...loginData, account_name: trimmedAccountName, phone_code_hash: res.phone_code_hash });
+      const pending = { account_name: trimmedAccountName, phone_number: loginData.phone_number, phone_code_hash: res.phone_code_hash };
+      if (epoch !== loginEpochRef.current) {
+        void cancelAccountLogin(pending).catch(() => {});
+        return;
+      }
+      phoneSessionRef.current = pending;
+      setLoginData({ ...loginData, ...pending });
       addToast(t("code_sent"), "success");
     } catch (err: any) {
+      if (epoch !== loginEpochRef.current) return;
       addToast(formatErrorMessage("send_code_failed", err), "error");
     } finally {
-      setLoading(false);
+      if (epoch === loginEpochRef.current) setLoading(false);
     }
   };
 
@@ -456,6 +478,7 @@ export default function Dashboard() {
       addToast(t("account_name_duplicate"), "error");
       return;
     }
+    const epoch = loginEpochRef.current;
     try {
       setLoading(true);
       await verifyAccountLogin({
@@ -467,6 +490,8 @@ export default function Dashboard() {
         proxy: loginData.proxy || undefined,
         chat_cache_ttl_minutes: parseChatCacheTtlMinutes(loginData.chat_cache_ttl_minutes),
       });
+      if (epoch !== loginEpochRef.current) return;
+      phoneSessionRef.current = null;
       addToast(t("login_success"), "success");
       setAccountStatusMap((prev) => ({
         ...prev,
@@ -485,9 +510,10 @@ export default function Dashboard() {
       setShowAddDialog(false);
       loadData();
     } catch (err: any) {
+      if (epoch !== loginEpochRef.current) return;
       addToast(formatErrorMessage("verify_failed", err), "error");
     } finally {
-      setLoading(false);
+      if (epoch === loginEpochRef.current) setLoading(false);
     }
   }, [
     token,
@@ -560,14 +586,11 @@ export default function Dashboard() {
   }, []);
 
   const clearQrPollingTimers = useCallback(() => {
-    if (qrPollTimerRef.current) {
-      clearInterval(qrPollTimerRef.current);
-      qrPollTimerRef.current = null;
-    }
-    if (qrPollDelayRef.current) {
-      clearTimeout(qrPollDelayRef.current);
-      qrPollDelayRef.current = null;
-    }
+    qrPollSeqRef.current += 1;
+    qrPollControllerRef.current?.abort();
+    qrPollControllerRef.current = null;
+    if (qrPollTimerRef.current) clearTimeout(qrPollTimerRef.current);
+    qrPollTimerRef.current = null;
     qrPollingActiveRef.current = false;
   }, []);
 
@@ -627,6 +650,8 @@ export default function Dashboard() {
   }, [clearQrTimers]);
 
   const openReloginDialog = useCallback((acc: AccountInfo) => {
+    abandonPhoneLogin();
+    setLoading(false);
     resetQrState();
     setReloginAccountName(acc.name);
     setLoginMode("phone");
@@ -637,7 +662,7 @@ export default function Dashboard() {
     });
     setShowAddDialog(true);
     addToast(t("account_relogin_required"), "error");
-  }, [addToast, resetQrState, t]);
+  }, [abandonPhoneLogin, addToast, resetQrState, t]);
 
   const handleAccountCardClick = useCallback((acc: AccountInfo) => {
     const statusInfo = accountStatusMap[acc.name];
@@ -663,6 +688,7 @@ export default function Dashboard() {
       }
       return null;
     }
+    const epoch = ++loginEpochRef.current;
     try {
       if (options?.autoRefresh) {
         qrRestartingRef.current = true;
@@ -675,6 +701,10 @@ export default function Dashboard() {
         proxy: loginData.proxy || undefined,
         chat_cache_ttl_minutes: parseChatCacheTtlMinutes(loginData.chat_cache_ttl_minutes),
       });
+      if (epoch !== loginEpochRef.current) {
+        void cancelQrLogin(res.login_id).catch(() => {});
+        return null;
+      }
       setLoginData((prev) => ({ ...prev, account_name: trimmedAccountName }));
       setQrLogin(res);
       qrActiveLoginIdRef.current = res.login_id;
@@ -684,14 +714,17 @@ export default function Dashboard() {
       setQrMessage("");
       return res;
     } catch (err: any) {
+      if (epoch !== loginEpochRef.current) return null;
       setQrPhaseSafe("error", "start_failed");
       if (!options?.silent) {
         addToast(formatErrorMessage("qr_create_failed", err), "error");
       }
       return null;
     } finally {
-      setQrLoading(false);
-      qrRestartingRef.current = false;
+      if (epoch === loginEpochRef.current) {
+        setQrLoading(false);
+        qrRestartingRef.current = false;
+      }
     }
   }, [
     token,
@@ -711,6 +744,7 @@ export default function Dashboard() {
 
   const handleSubmitQrPassword = useCallback(async (passwordOverride?: string) => {
     if (!token || !qrLogin?.login_id) return;
+    const epoch = loginEpochRef.current;
     const passwordValue = passwordOverride ?? qrPasswordRef.current;
     if (!passwordValue) {
       const msg = t("qr_password_missing");
@@ -724,6 +758,7 @@ export default function Dashboard() {
         login_id: qrLogin.login_id,
         password: passwordValue,
       });
+      if (epoch !== loginEpochRef.current) return;
       addToast(t("login_success"), "success");
       const doneAccount = normalizeAccountName(loginData.account_name);
       if (doneAccount) {
@@ -746,6 +781,7 @@ export default function Dashboard() {
       setShowAddDialog(false);
       loadData();
     } catch (err: any) {
+      if (epoch !== loginEpochRef.current) return;
       const errMsg = err?.message ? String(err.message) : "";
       const fallback = formatErrorMessage("qr_login_failed", err);
       let message = errMsg || fallback;
@@ -760,7 +796,7 @@ export default function Dashboard() {
       }
       setQrMessage(message);
     } finally {
-      setQrPasswordLoading(false);
+      if (epoch === loginEpochRef.current) setQrPasswordLoading(false);
     }
   }, [
     token,
@@ -792,7 +828,7 @@ export default function Dashboard() {
     const stopPolling = () => {
       if (stopped) return;
       stopped = true;
-      clearQrPollingTimers();
+      if (qrPollSeqRef.current === seq) clearQrPollingTimers();
     };
 
     const shouldAutoRefresh = () => {
@@ -805,9 +841,13 @@ export default function Dashboard() {
     };
 
     const poll = async () => {
+      if (stopped || qrPollSeqRef.current !== seq || !qrPollingActiveRef.current) return;
+      const controller = new AbortController();
+      qrPollControllerRef.current = controller;
+      const deadline = setTimeout(() => controller.abort(), 10000);
       try {
         if (qrRestartingRef.current) return;
-        const res = await getQrLoginStatus(loginId);
+        const res = await getQrLoginStatus(loginId, controller.signal);
         if (stopped) return;
         if (qrActiveLoginIdRef.current !== loginId) return;
         if (qrPollSeqRef.current !== seq) return;
@@ -906,13 +946,16 @@ export default function Dashboard() {
           addToast(formatErrorMessage("qr_status_failed", err), "error");
           markToastShown(loginId, "error");
         }
+      } finally {
+        clearTimeout(deadline);
+        if (qrPollControllerRef.current === controller) qrPollControllerRef.current = null;
+        if (!stopped && qrPollSeqRef.current === seq && qrPollingActiveRef.current) {
+          qrPollTimerRef.current = setTimeout(poll, 1500);
+        }
       }
     };
 
-    qrPollDelayRef.current = setTimeout(() => {
-      poll();
-      qrPollTimerRef.current = setInterval(poll, 1500);
-    }, 0);
+    qrPollTimerRef.current = setTimeout(poll, 0);
 
     return stopPolling;
   }, [
@@ -942,28 +985,27 @@ export default function Dashboard() {
   };
 
   const handleCancelQrLogin = async () => {
-    if (!token || !qrLogin?.login_id) {
-      resetQrState();
-      return;
-    }
+    const loginId = qrLogin?.login_id;
+    const epoch = ++loginEpochRef.current;
+    resetQrState();
+    if (!token || !loginId) return;
     try {
-      setQrLoading(true);
-      await cancelQrLogin(qrLogin.login_id);
+      await cancelQrLogin(loginId);
     } catch (err: any) {
-      addToast(formatErrorMessage("cancel_failed", err), "error");
-    } finally {
-      setQrLoading(false);
-      resetQrState();
+      if (epoch === loginEpochRef.current) addToast(formatErrorMessage("cancel_failed", err), "error");
     }
   };
 
-
-  // 手动提交 2FA（避免自动重试导致重复请求）
+  useEffect(() => () => {
+    clearQrTimers();
+    const loginId = qrActiveLoginIdRef.current;
+    if (loginId) void cancelQrLogin(loginId).catch(() => {});
+  }, [clearQrTimers]);
 
   const handleCloseAddDialog = () => {
-    if (qrLogin?.login_id) {
-      handleCancelQrLogin();
-    }
+    abandonPhoneLogin();
+    void handleCancelQrLogin();
+    setLoading(false);
     setReloginAccountName(null);
     setLoginData({ ...EMPTY_LOGIN_DATA });
     setLoginMode("phone");
@@ -1284,8 +1326,8 @@ export default function Dashboard() {
                   size="sm"
                   className="flex-1"
                   onClick={() => {
-                    if (loginMode !== "phone" && qrLogin?.login_id) {
-                      handleCancelQrLogin();
+                    if (loginMode !== "phone") {
+                      void handleCancelQrLogin();
                     }
                     setLoginMode("phone");
                   }}
@@ -1296,7 +1338,12 @@ export default function Dashboard() {
                   variant={loginMode === "qr" ? "default" : "secondary"}
                   size="sm"
                   className="flex-1"
-                  onClick={() => setLoginMode("qr")}
+                  onClick={() => {
+                    abandonPhoneLogin();
+                    setLoading(false);
+                    setLoginData((prev) => ({ ...prev, phone_code_hash: "", phone_code: "", password: "" }));
+                    setLoginMode("qr");
+                  }}
                 >
                   {t("login_method_qr")}
                 </Button>
@@ -1308,6 +1355,7 @@ export default function Dashboard() {
                     <FormField label={t("session_name")} htmlFor="account-name-input">
                       <Input
                         id="account-name-input"
+                        disabled={loading || Boolean(loginData.phone_code_hash)}
                         type="text"
                         className="h-11"
                         placeholder={t("account_name_placeholder")}
@@ -1322,6 +1370,7 @@ export default function Dashboard() {
                     <FormField label={t("phone_number")} htmlFor="phone-number-input">
                       <Input
                         id="phone-number-input"
+                        disabled={loading || Boolean(loginData.phone_code_hash)}
                         type="text"
                         className="h-11"
                         placeholder={t("phone_number_placeholder")}

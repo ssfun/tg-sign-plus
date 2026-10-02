@@ -1174,7 +1174,7 @@ def get_sign_task_status(
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
-    if service.get_task(task_name, account_name) is None:
+    if not service.task_exists(task_name, account_name):
         raise HTTPException(status_code=404, detail="任务不存在")
     return {"running": service.is_task_running(task_name, account_name=account_name)}
 
@@ -1220,8 +1220,7 @@ def get_sign_task_history(
     service: SignTaskService = Depends(get_sign_task_service),
 ):
     account_name = _valid_account_name(account_name)
-    task = service.get_task(task_name, account_name=account_name)
-    if not task:
+    if not service.task_exists(task_name, account_name):
         raise HTTPException(status_code=404, detail=f"任务 {task_name} 不存在")
 
     return service.get_task_history_logs(
@@ -1229,6 +1228,19 @@ def get_sign_task_history(
         account_name=account_name,
         limit=limit,
     )
+
+
+@router.get("/{task_name}/history/state")
+def get_sign_task_history_state(
+    task_name: str,
+    account_name: str,
+    current_user=Depends(get_current_user),
+    service: SignTaskService = Depends(get_sign_task_service),
+):
+    state = service.get_history_state(task_name, _valid_account_name(account_name))
+    if state is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return state
 
 
 @router.get("/chats/{account_name}", response_model=ChatCacheResponse)

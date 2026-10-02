@@ -1,0 +1,33 @@
+Resource efficiency acceptance scenarios (written before implementation)
+
+HTTP / real database:
+- Account-filtered task listing must not hydrate another account's history; cold and warm queries must stay bounded, not grow per task.
+- Scheduler/status endpoints must not load/decode historical flow bodies.
+- History limits must be SQL limits; limit=1/30 and account limit=100 must materialize only the requested rows. Export stays complete.
+- Repeated history GETs must not DELETE or commit; retention must still hide expired rows. Disabling retention exposes retained rows until maintenance has deleted them.
+- New and v4 databases must migrate idempotently to lightweight last-run summaries and chronology/expiration indexes. Legacy history summaries must still work.
+- Maintenance deletes only expired task history and expired refresh tokens. Unexpired revoked tokens stay revoked. Audit retention is independent, disabled unless explicitly configured.
+- Updating/importing a task must not resurrect stale last-run summaries. A history save followed by failed config-summary update must still show the new result.
+
+Telegram external boundary faked; real auth, routes, services, scheduler and persistence:
+- Phone start/verify/cancel/expiry release their operation locks; pending OTP must not hold the account lock.
+- Expiry/cancel/old verify from session A must never remove or close replacement session B.
+- Missing/wrong 2FA retains a bounded session; success/failure/cancellation disconnects once and drains migrated sessions.
+- Concurrent starts/verifies/cancel and slow/cancelled connect/send-code must not leak clients or locks; invalid credentials/proxy must not leak either.
+- Probe success/failure/timeout closes its own temporary client; running task clients are untouched. Lock wait and connect are included in the budget.
+
+Bounded isolation where external dependencies prevent an application-level trigger:
+- A completion event wakes immediately without periodic sleeps; history rescue runs at its configured deadline and stops after completion/cancellation.
+- Multiple AI operations within one worker run reuse one client; success/error/cancellation closes it. A subsequent run reloads configuration. AI connection-test closes its client.
+- PostgreSQL keeps pool_pre_ping only, recovers stale connections, and has no duplicate checkout SELECT 1.
+- Permission repair visits /data once and preserves owner/write/execute semantics. Runtime image has no compiler, preserves default Komari and architecture-specific tgcrypto.
+
+Browser through ego-browser, after implementation:
+- Switching away during QR start or QR password submission must fence late success/error responses.
+- A plain postgresql:// URL must use the psycopg2 driver declared by the project, including on SQLAlchemy 2.1.
+- History polls are serial, abort on close/account change, pause while hidden and refresh on return; idle polls use lightweight running/latest marker and heavy details refresh only on changes.
+- Completion from scheduled/other-tab tasks updates an open history panel.
+- Slow QR status calls never overlap; close/mode switch aborts them; timeout retries; stale responses do not change a new session.
+- Closing/switching phone login cancels the matching server session, including late start responses; verification in flight cannot update a closed/replaced dialog.
+
+Run the complete E2E at the end. Preserve JSON metrics, SQL counts, lifecycle receipts and browser screenshots as repeatable artifacts. No real Telegram messages or production database mutations.

@@ -264,12 +264,17 @@ tg-signer --data-dir /data --account my_account canary-report --max-age-hours 36
 | `APP_REFRESH_COOKIE_SECURE` | HTTPS 部署设为 `true`；HTTP/IP 直连必须为 `false` | `false` |
 | `APP_CORS_ALLOW_ORIGIN_REGEX` | 跨域来源正则 | 仅 localhost/127.0.0.1 |
 | `APP_ALLOW_PASSWORD_TOTP_RESET` | 是否开放通过密码重置管理端 TOTP | `false` |
+| `APP_AUDIT_LOG_RETENTION_DAYS` | 安全审计日志保留天数；独立于任务日志，`0` 表示不自动删除 | `0` |
 
 SQLite 默认启用 WAL。也可使用 PostgreSQL，例如：
 
 ```bash
 APP_DATABASE_URL=postgresql://user:password@db:5432/tg_sign_plus
 ```
+
+启动后及每天本地时区 03:00，现有维护任务清理过期任务历史和已到期的 refresh token。历史读取只过滤过期记录，不触发数据库清理；完整日志导出仍包含保留期内的全部历史。安全审计仅在显式设置 `APP_AUDIT_LOG_RETENTION_DAYS` 后按该天数清理。
+
+任务列表只加载摘要，历史弹窗通过轻量状态检测变化后再加载详情，页面隐藏时暂停刷新。调度文本日志按 3 MiB 轮转、保留 3 个备份；Komari 输出交给容器日志系统管理。
 
 如果通过 HTTPS 反向代理访问，设置 `APP_REFRESH_COOKIE_SECURE=true`；通过 `http://服务器IP:8080` 访问时不要开启，否则浏览器不会携带安全 cookie，后续写请求会因 CSRF 校验返回 403。
 
@@ -295,6 +300,8 @@ Web 后端的 Telegram、AI 和全局设置保存在数据库中。`TG_API_ID`/`
 | `TG_CHANNEL_DIFF_CONCURRENCY` | `2` | channel difference 并发数 |
 | `TG_RPC_RETRIES` | `2` | Telegram RPC 重试次数 |
 | `TG_RPC_TIMEOUT` | `30` | Telegram RPC 超时秒数 |
+| `TG_LOGIN_TIMEOUT` | `30` | 手机登录发送、验证、取消操作的等待上限，另有有界连接清理 |
+| `TG_PHONE_LOGIN_TTL` | `300` | 手机验证码会话保留秒数；等待 2FA 时续期，取消或过期后关闭连接 |
 | `TG_CONNECT_TIMEOUT` | `20` | 连接/认证阶段超时秒数 |
 | `TG_CONNECT_RETRIES` | `3` | 连接/认证阶段尝试次数 |
 | `TG_CONNECT_RETRY_WAIT` | `3` | 连接重试等待秒数 |
@@ -307,6 +314,12 @@ Web 后端的 Telegram、AI 和全局设置保存在数据库中。`TG_API_ID`/`
 | `SIGN_TASK_ACCOUNT_LOCK_TIMEOUT` | `300` | 等待同账号执行锁的最长秒数 |
 | `SIGN_TASK_GLOBAL_CONCURRENCY_TIMEOUT` | `300` | 等待全局并发槽的最长秒数 |
 | `TG_SIGN_TASK_DISABLE_UPDATES` | `false` | 强制关闭签到 updates，仅用于低内存排障；按钮/回复类任务可能失败 |
+
+手机验证码等待期间不占用账号执行锁，只有登录操作本身与账号任务互斥。账号探活使用临时连接并在结束后关闭；任务内的 AI 请求复用同一个客户端，在任务结束后释放。
+
+资源回归验收可运行 `python tests/e2e/resource_efficiency.py --output /tmp/tg-resource-e2e`。脚本使用隔离数据库和模拟 Telegram 传输，不访问真实账号；输出包含 HTTP、SQL 查询量和连接回收结果的 `resource-e2e.json`。失败场景清单见 `tests/e2e/resource_efficiency_scenarios.txt`。
+
+Checks 会在 Python 3.10/3.12 上运行该验收并上传结果。PostgreSQL 验收使用 `tests/e2e/postgres_resource_efficiency.py --output /tmp/tg-resource-e2e`，通过 `E2E_POSTGRES_URL` 指定本机一次性数据库 `efficiency_e2e`；脚本会修改该测试库的 schema，请勿指向业务数据库。浏览器验收可先构建前端，再为 HTTP 验收脚本追加 `--serve 18765`，使用其隔离账号 `efficiency` / `Efficiency123!` 登录。
 
 ## 签到任务
 

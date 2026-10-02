@@ -2244,12 +2244,19 @@ class SignEventRunner:
 
     async def _wait_finished(self) -> EventRunResult:
         while not self.finished.is_set():
-            if self.history_limit > 0 and not self.history_rescue_suspended:
-                now = asyncio.get_running_loop().time()
-                if now - self._last_history_rescue_at >= self.history_rescue_interval:
-                    self._last_history_rescue_at = now
-                    await self._walk_history_rescue_until_finished()
-            await asyncio.sleep(0.2)
+            if self.history_limit <= 0:
+                await self.finished.wait()
+                break
+            now = asyncio.get_running_loop().time()
+            interval = max(0.2, self.history_rescue_interval)
+            if not self.history_rescue_suspended and now - self._last_history_rescue_at >= interval:
+                self._last_history_rescue_at = now
+                await self._walk_history_rescue_until_finished()
+            delay = interval if self.history_rescue_suspended else max(0.2, interval - (asyncio.get_running_loop().time() - self._last_history_rescue_at))
+            try:
+                await asyncio.wait_for(self.finished.wait(), timeout=delay)
+            except asyncio.TimeoutError:
+                pass
         return self.result or EventRunResult(EventRunStatus.FAILED, "missing result")
 
     async def _walk_history_rescue_until_finished(self) -> bool:

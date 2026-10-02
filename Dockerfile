@@ -13,6 +13,20 @@ COPY frontend/ ./
 RUN npm run build
 
 
+FROM python:3.12-slim AS python-builder
+
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
+  rm -rf /var/lib/apt/lists/*
+COPY . /build
+RUN pip install --no-cache-dir --prefix=/install .
+
+# Keep the existing architecture support boundary for tgcrypto.
+ARG TARGETPLATFORM
+RUN if [ "${TARGETPLATFORM:-}" = "linux/amd64" ] || [ "$(uname -m)" = "x86_64" ]; then \
+    pip install --no-cache-dir --prefix=/install tgcrypto; \
+  fi
+
 FROM python:3.12-slim AS app
 
 ENV PYTHONUNBUFFERED=1 \
@@ -25,24 +39,15 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential tzdata gosu && \
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata gosu && \
   rm -rf /var/lib/apt/lists/*
   
 
 # Keep Komari in the default image; credentials control whether it starts.
 COPY --from=ghcr.io/komari-monitor/komari-agent:latest /app/komari-agent /app/komari-agent
 
-# Copy project sources and install Python dependencies from pyproject.
-COPY . /app
-RUN pip install --no-cache-dir .
-
-# Install tgcrypto only on amd64 to avoid arm64 build failures.
-ARG TARGETPLATFORM
-RUN if [ "${TARGETPLATFORM:-}" = "linux/amd64" ] || [ "$(uname -m)" = "x86_64" ]; then \
-    pip install --no-cache-dir tgcrypto; \
-  else \
-    echo "Skipping tgcrypto on ${TARGETPLATFORM:-unknown}"; \
-  fi
+# Installed project and runtime dependencies; no compiler or source checkout.
+COPY --from=python-builder /install /usr/local
 
 # Frontend static files served from /web.
 RUN mkdir -p /web

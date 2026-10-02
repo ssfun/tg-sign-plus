@@ -236,12 +236,20 @@ export const startAccountLogin = (data: LoginStartRequest) =>
   request<LoginStartResponse>("/accounts/login/start", {
     method: "POST",
     body: JSON.stringify(data),
+    signal: AbortSignal.timeout(35000),
   });
 
 export const verifyAccountLogin = (data: LoginVerifyRequest) =>
   request<LoginVerifyResponse>("/accounts/login/verify", {
     method: "POST",
     body: JSON.stringify(data),
+    signal: AbortSignal.timeout(35000),
+  });
+
+export const cancelAccountLogin = (data: Pick<LoginVerifyRequest, "account_name" | "phone_number" | "phone_code_hash">) =>
+  request<{ cancelled: boolean }>("/accounts/login/cancel", {
+    method: "POST", body: JSON.stringify(data), keepalive: true,
+    signal: AbortSignal.timeout(35000),
   });
 
 export const listAccounts = () =>
@@ -276,8 +284,8 @@ export const startQrLogin = (data: QrLoginStartRequest) =>
     body: JSON.stringify(data),
   });
 
-export const getQrLoginStatus = (loginId: string) =>
-  request<QrLoginStatusResponse>(`/accounts/qr/status?login_id=${encodeURIComponent(loginId)}`);
+export const getQrLoginStatus = (loginId: string, signal?: AbortSignal) =>
+  request<QrLoginStatusResponse>(`/accounts/qr/status?login_id=${encodeURIComponent(loginId)}`, { signal });
 
 export const cancelQrLogin = (loginId: string) =>
   request<QrLoginCancelResponse>("/accounts/qr/cancel", {
@@ -1344,3 +1352,9 @@ export const getSignTaskHistory = (
     { signal }
   );
 };
+
+export const getSignTaskHistoryState = (name: string, accountName: string, signal?: AbortSignal) =>
+  request<{ revision: string; running: boolean }>(
+    `/sign-tasks/${pathSegment(name)}/history/state?account_name=${encodeURIComponent(accountName)}`,
+    { signal }
+  );

@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from backend.core.auth import get_current_user
@@ -70,6 +70,12 @@ class LoginVerifyResponse(BaseModel):
     first_name: Optional[str] = None
     username: Optional[str] = None
     message: str
+
+
+class LoginCancelRequest(BaseModel):
+    account_name: str
+    phone_number: str
+    phone_code_hash: str
 
 
 class QrLoginStartRequest(BaseModel):
@@ -234,6 +240,17 @@ async def start_account_login(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"发送验证码失败: {str(e)}",
         )
+
+
+@router.post("/login/cancel")
+async def cancel_account_login(request: LoginCancelRequest, current_user: User = Depends(get_current_user)):
+    try:
+        cancelled = await get_telegram_service().cancel_phone_login(
+            _valid_account_name(request.account_name), request.phone_number, request.phone_code_hash,
+        )
+        return {"cancelled": cancelled}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=409, detail="登录操作仍在处理中，请稍后重试")
 
 
 @router.post("/login/verify", response_model=LoginVerifyResponse)
@@ -641,13 +658,13 @@ class ClearAccountLogsResponse(BaseModel):
 @router.get("/{account_name}/logs", response_model=list[AccountLogItem])
 def get_account_logs(
     account_name: str,
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
     sign_task_service: SignTaskService = Depends(get_sign_task_service),
 ):
     """获取账号的任务执行历史日志"""
     account_name = _valid_account_name(account_name)
-    history = sign_task_service.get_account_history_logs(account_name)
+    history = sign_task_service.get_account_history_logs(account_name, limit=limit)
 
     logs = []
     for i, item in enumerate(history[:limit]):

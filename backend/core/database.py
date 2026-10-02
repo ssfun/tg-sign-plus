@@ -25,6 +25,9 @@ def init_engine() -> None:
 
     settings = get_settings()
     db_url = settings.database_url
+    # Keep the driver aligned with our declared dependency across SQLAlchemy versions.
+    if db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
     kwargs: dict = {"echo": False}
 
     if _is_sqlite(db_url):
@@ -54,14 +57,6 @@ def init_engine() -> None:
         def set_postgres_session_timezone(dbapi_connection, connection_record):
             with dbapi_connection.cursor() as cursor:
                 cursor.execute("SET TIME ZONE UTC")
-
-        @event.listens_for(engine, "checkout")
-        def check_postgres_connection(dbapi_connection, connection_record, connection_proxy):
-            cursor = dbapi_connection.cursor()
-            try:
-                cursor.execute("SELECT 1")
-            finally:
-                cursor.close()
 
     _engine = engine
     _SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
