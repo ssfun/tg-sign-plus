@@ -21,6 +21,9 @@ Failure scenarios, written before implementation:
   most 50 items, support search and paging, preserve a selected/manual chat,
   and fence delayed results after search/page/account/dialog changes. Closing
   or refreshing must abort obsolete reads. A failed refresh must remain retryable.
+  If an explicit refresh fails after a successful page load, preserve that page,
+  selected/manual chat and metadata; cached search and paging must still work
+  while Telegram remains unavailable. Also cover refresh during a pending search.
 
 Run at final acceptance, with runtime dependencies installed:
 

@@ -42,7 +42,12 @@ export function ChatPicker({ accountName, selectedId, onSelect, onBusyChange, on
                     : await getAccountChats(accountName, {
                         autoRefreshIfExpired: true, ensureExists: true, includeItems: false,
                     }, controller.signal);
-                if (!controller.signal.aborted) setMeta(result);
+                if (!controller.signal.aborted) {
+                    setItems([]);
+                    setLoading(true);
+                    setFailed(false);
+                    setMeta(result);
+                }
             } catch (error) {
                 if (!controller.signal.aborted) errorRef.current(error);
             } finally {
@@ -59,7 +64,7 @@ export function ChatPicker({ accountName, selectedId, onSelect, onBusyChange, on
     }, [accountName, refresh, onBusyChange]);
 
     useEffect(() => {
-        if (!meta) return;
+        if (!meta || refreshing) return;
         const controller = new AbortController();
         pageController.current = controller;
         const timer = setTimeout(() => {
@@ -71,6 +76,7 @@ export function ChatPicker({ accountName, selectedId, onSelect, onBusyChange, on
                         setOffset(Math.max(0, Math.ceil(result.total / PAGE_SIZE) - 1) * PAGE_SIZE);
                         return;
                     }
+                    setFailed(false);
                     setItems(result.items);
                     setTotal(result.total);
                 } catch (error) {
@@ -84,7 +90,7 @@ export function ChatPicker({ accountName, selectedId, onSelect, onBusyChange, on
             })();
         }, query.trim() ? 300 : 0);
         return () => { clearTimeout(timer); controller.abort(); };
-    }, [accountName, meta, query, offset, retry]);
+    }, [accountName, meta, query, offset, retry, refreshing]);
 
     const changePage = (next: number) => {
         pageController.current?.abort();
@@ -98,8 +104,9 @@ export function ChatPicker({ accountName, selectedId, onSelect, onBusyChange, on
         <div className="flex items-center justify-between gap-2">
             <label htmlFor="chat-picker-search" className="text-xs text-[var(--text-tertiary)]">{t("search_chat")}</label>
             <Button type="button" variant="ghost" size="sm" disabled={refreshing} onClick={() => {
-                changePage(0);
-                setMeta(null);
+                // Keep the last successful page if Telegram refresh fails.
+                // Resume any interrupted cache read when refreshing settles.
+                pageController.current?.abort();
                 setRefreshing(true);
                 setRefresh(value => value + 1);
             }}>{refreshing ? t("loading") : t("refresh_list")}</Button>
