@@ -1339,6 +1339,7 @@ export default function Dashboard() {
                   size="sm"
                   className="flex-1"
                   onClick={() => {
+                    if (loginMode === "qr") return;
                     abandonPhoneLogin();
                     setLoading(false);
                     setLoginData((prev) => ({ ...prev, phone_code_hash: "", phone_code: "", password: "" }));

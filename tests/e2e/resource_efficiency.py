@@ -61,6 +61,7 @@ import backend.scheduler as scheduler
 from pyrogram.errors import SessionPasswordNeeded, PasswordHashInvalid
 from tg_signer.event_runner import SignEventRunner
 from tg_signer.core import UserSigner
+from telegram_lifecycle_acceptance import run_lifecycle_acceptance
 
 transport = {
     "clients": [],
@@ -401,6 +402,9 @@ def run_http(client):
     }
     assert receipts["telegram"]["still_connected"] == 0
     client.portal.call(concurrent_http, dict(client.cookies))
+    receipts["review_regressions"] = client.portal.call(
+        run_lifecycle_acceptance, app, headers, dict(client.cookies)
+    )
     client.portal.call(scheduler._job_maintenance)
     with get_session_local()() as db:
         assert db.query(SignTaskRun).filter_by(message="expired").count() == 0
@@ -478,8 +482,11 @@ async def concurrent_http(cookies):
             await cancelled
         except asyncio.CancelledError:
             pass
-        await asyncio.sleep(0)
-        assert not get_account_lock("cancel-inflight").locked()
+        # Python 3.10/ASGI cancellation can return before the owned cleanup task.
+        # Require the account to become reusable within a bounded grace period.
+        lock = get_account_lock("cancel-inflight")
+        await asyncio.wait_for(lock.acquire(), timeout=2)
+        lock.release()
         assert not transport["clients"][-1].is_connected
         transport["connect_delay"] = 0
         # Waiting on someone else's execution lock is part of the probe budget.

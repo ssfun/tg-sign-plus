@@ -15,6 +15,9 @@ Telegram external boundary faked; real auth, routes, services, scheduler and per
 - Missing/wrong 2FA retains a bounded session; success/failure/cancellation disconnects once and drains migrated sessions.
 - Concurrent starts/verifies/cancel and slow/cancelled connect/send-code must not leak clients or locks; invalid credentials/proxy must not leak either.
 - Probe success/failure/timeout closes its own temporary client; running task clients are untouched. Lock wait and connect are included in the budget.
+- A send-code failure just before the operation deadline must finish disconnecting even when the deadline arrives during cleanup. Repeated request cancellation during cleanup must propagate only after owned resources are released.
+- Real Kurigram primary and migrated sessions whose stop is cancelled in STOPPING must have their actual connections closed and pending receive/packet tasks drained. Successful ordinary cleanup must still close normally.
+- Probe proxy selection preserves account proxy > TG_PROXY > direct connection; probes must not register shared clients.
 
 Bounded isolation where external dependencies prevent an application-level trigger:
 - A completion event wakes immediately without periodic sleeps; history rescue runs at its configured deadline and stops after completion/cancellation.
@@ -24,6 +27,7 @@ Bounded isolation where external dependencies prevent an application-level trigg
 
 Browser through ego-browser, after implementation:
 - Switching away during QR start or QR password submission must fence late success/error responses.
+- Clicking the already-selected QR method during a delayed start must leave that start valid; the QR must appear, generation must become enabled, and no cancellation request may be sent. Switching to phone and closing still cancel the matching QR session.
 - A plain postgresql:// URL must use the psycopg2 driver declared by the project, including on SQLAlchemy 2.1.
 - History polls are serial, abort on close/account change, pause while hidden and refresh on return; idle polls use lightweight running/latest marker and heavy details refresh only on changes.
 - Completion from scheduled/other-tab tasks updates an open history panel.

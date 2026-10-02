@@ -130,12 +130,12 @@ class TelegramService:
         检测账号 session 是否可用。
 
         设计目标：
-        1. 复用共享 Client，不主动关闭正在运行中的任务连接。
+        1. 使用独立临时 Client，不影响正在运行中的任务连接。
         2. 使用单次 get_me 探活，避免执行重操作。
         3. 将“会话失效”与“临时网络错误”分开，前端可据此决定是否引导重新登录。
         """
         from pyrogram import Client
-        from tg_signer.client_manager import get_api_config
+        from tg_signer.client_manager import get_api_config, get_proxy
 
         checked_at = datetime.utcnow().isoformat() + "Z"
 
@@ -179,7 +179,7 @@ class TelegramService:
                     api_id, api_hash = get_api_config()
                     client = Client(
                         name=account_name, api_id=api_id, api_hash=api_hash,
-                        proxy=proxy_dict, workdir=self.session_dir,
+                        proxy=proxy_dict or get_proxy(), workdir=self.session_dir,
                         session_string=session_string, in_memory=True, no_updates=True,
                     )
                     try:
@@ -363,34 +363,67 @@ class TelegramService:
 
     @staticmethod
     async def _close_temporary_client(client) -> None:
-        """Close an owned client, including migrated DC sessions, with bounded steps."""
+        """Finish bounded teardown before propagating caller cancellation."""
+        from tg_signer.client_manager import _await_cleanup_step
+
         async def close_step(call):
             try:
                 result = call()
                 if inspect.isawaitable(result):
-                    await asyncio.wait_for(result, timeout=3)
+                    await _await_cleanup_step(result, timeout=3)
                 return True
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 logger.warning("Failed to close temporary Telegram client", exc_info=True)
                 return False
 
-        sessions = getattr(client, "sessions", {})
-        for session in list(sessions.values()):
-            await close_step(session.stop)
-        sessions.clear()
-        if getattr(client, "is_initialized", False):
-            closed = await close_step(client.stop)
-        else:
-            closed = await close_step(client.disconnect)
-        # connect() can fail before is_connected is set; disconnect() then cannot
-        # close the partially initialized primary session/storage by itself.
-        if not closed:
+        async def close_transport(session):
+            # Kurigram stop() returns early in STOPPING after a cancelled stop.
+            # Close the captured transport even when another stop reports success.
+            connection = getattr(session, "connection", None)
+            closed = False
+            if connection and getattr(connection, "close", None):
+                closed = await close_step(connection.close)
+            tasks = set(getattr(session, "pending_tasks", ()))
+            tasks.update(getattr(session, name, None) for name in ("ping_task", "recv_task"))
+            tasks.discard(None)
+            tasks.discard(asyncio.current_task())
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                async def drain():
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                await close_step(drain)
+            return closed
+
+        async def cleanup():
+            # disconnect() clears client.session; retain ownership until teardown ends.
             primary = getattr(client, "session", None)
-            if primary and getattr(primary, "stop", None):
+            sessions = getattr(client, "sessions", {})
+            for session in list(sessions.values()):
+                await close_step(session.stop)
+                await close_transport(session)
+            sessions.clear()
+            close = client.stop if getattr(client, "is_initialized", False) else client.disconnect
+            closed = await close_step(close)
+            if not closed and primary and getattr(primary, "stop", None):
                 await close_step(primary.stop)
-            storage = getattr(client, "storage", None)
-            if storage and getattr(storage, "close", None):
-                await close_step(storage.close)
+            if primary and await close_transport(primary):
+                client.is_connected = False
+            if not closed:
+                storage = getattr(client, "storage", None)
+                if storage and getattr(storage, "close", None):
+                    await close_step(storage.close)
+
+        pending = asyncio.create_task(cleanup())
+        cancelled = None
+        while not pending.done():
+            try:
+                await asyncio.shield(pending)
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+        pending.result()
+        if cancelled is not None:
+            raise cancelled
 
     @staticmethod
     def _login_seconds(name: str, default: int) -> int:
